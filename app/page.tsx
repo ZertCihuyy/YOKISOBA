@@ -19,6 +19,32 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<LavalinkTrack[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [topPlayed, setTopPlayed] = useState<LavalinkTrack[]>([]);
+  const [spotifyTop, setSpotifyTop] = useState<LavalinkTrack[]>([]);
+  const [llStatus, setLlStatus] = useState({ online: false, latency: '...', version: '...' });
+
+  // Load Top Playlists
+  useEffect(() => {
+    const fetchSpotifyTop = async () => {
+      try {
+        const res = await fetch('/api/spotify/top');
+        if (res.ok) setSpotifyTop(await res.json());
+      } catch {}
+    };
+    fetchSpotifyTop();
+  }, []);
+
+  // Poll Lavalink Status
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/lavalink/status');
+        if (res.ok) setLlStatus(await res.json());
+      } catch {}
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     setTopPlayed(getTopPlayed());
@@ -97,7 +123,15 @@ export default function Home() {
       <div className="flex-1 flex flex-col overflow-y-auto lg:overflow-hidden p-4 lg:p-8 order-2 lg:order-1 pb-24 lg:pb-0">
         <header className="mb-6 lg:mb-10 flex flex-col lg:flex-row lg:justify-between lg:items-center space-y-4 lg:space-y-0 mt-4 lg:mt-0">
           <div>
-            <h1 className="text-3xl lg:text-4xl font-black tracking-tighter text-white mb-1 lg:mb-2 drop-shadow-sm">Yakisoba DJ</h1>
+            <div className="flex items-center space-x-3 mb-1">
+              <h1 className="text-3xl lg:text-4xl font-black tracking-tighter text-white drop-shadow-sm">Yakisoba DJ</h1>
+              <div className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full border text-[10px] font-black uppercase tracking-tighter transition-all ${
+                llStatus.online ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-red-500/10 border-red-500/30 text-red-500'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${llStatus.online ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                <span>Node {llStatus.online ? 'Online' : 'Offline'} ({llStatus.latency})</span>
+              </div>
+            </div>
             <p className="text-zinc-400 font-medium text-sm lg:text-base">TikTok Live Interactive Music Streamer</p>
           </div>
           
@@ -137,19 +171,23 @@ export default function Home() {
           />
         </form>
 
-        <div className="flex-1 lg:overflow-y-auto pr-0 lg:pr-4 pb-4 lg:pb-24">
+        <div className="flex-1 lg:overflow-y-auto pr-0 lg:pr-4 pb-4 lg:pb-24 space-y-8">
           {isSearching ? (
             <div className="text-zinc-500 font-bold animate-pulse text-lg">Searching Lavalink...</div>
           ) : searchResults.length > 0 ? (
             renderTrackList(searchResults, "Search Results", <Search size={24} className="text-pink-500" />)
-          ) : topPlayed.length > 0 ? (
-            renderTrackList(topPlayed, "DJ's Top Played (Local History)", <History size={24} className="text-purple-500" />)
           ) : (
-            <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-8 lg:h-64 flex flex-col items-center justify-center space-y-4 text-center">
-              <div className="text-5xl lg:text-6xl drop-shadow-lg mb-2">📻</div>
-              <h3 className="text-xl lg:text-2xl font-black text-white">Ready to Stream</h3>
-              <p className="text-zinc-400 font-medium max-w-md text-sm lg:text-base">Connect to a TikTok live on the right, or search for songs manually to start building your queue.</p>
-            </div>
+            <>
+              {topPlayed.length > 0 && renderTrackList(topPlayed, "DJ's Top Played (Local History)", <History size={24} className="text-purple-500" />)}
+              {spotifyTop.length > 0 && renderTrackList(spotifyTop, "Global Top Songs (Spotify)", <Plus size={24} className="text-green-500" />)}
+              {topPlayed.length === 0 && spotifyTop.length === 0 && (
+                <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-3xl p-8 lg:h-64 flex flex-col items-center justify-center space-y-4 text-center">
+                  <div className="text-5xl lg:text-6xl drop-shadow-lg mb-2">📻</div>
+                  <h3 className="text-xl lg:text-2xl font-black text-white">Ready to Stream</h3>
+                  <p className="text-zinc-400 font-medium max-w-md text-sm lg:text-base">Connect to a TikTok live on the right, or search for songs manually to start building your queue.</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
