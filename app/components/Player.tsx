@@ -2,261 +2,244 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
-import { Play, Pause, SkipForward, Volume2, RefreshCw, AlertCircle, ExternalLink, Settings, Video } from 'lucide-react';
+import { 
+  Play, Pause, SkipForward, Volume2, RefreshCw, 
+  Settings, Monitor, Layout, Maximize2, Minimize2, 
+  ChevronUp, ChevronDown, Clock
+} from 'lucide-react';
 
 export default function Player() {
   const { 
-    currentTrack, isPlaying, play, pause, resume, next, 
-    volume, setVolume, playerMode, setPlayerMode 
+    currentTrack, isPlaying, pause, resume, next, 
+    volume, setVolume, playerMode, setPlayerMode,
+    uiMode, setUiMode
   } = usePlayerStore();
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [needsInteraction, setNeedsInteraction] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isEmbedVisible, setIsEmbedVisible] = useState(true);
 
-  const lastTimeRef = useRef(0);
-  const retryCountRef = useRef(0);
-
-  // 1. Resolve URL & Reset States
+  // 1. Resolve URL
   useEffect(() => {
-    if (!currentTrack) {
+    if (!currentTrack || playerMode !== 'normal') {
       setResolvedUrl(null);
-      setErrorMessage(null);
       return;
     }
-
-    if (playerMode === 'normal') {
-      setIsLoading(true);
-      setErrorMessage(null);
-      setNeedsInteraction(false);
-      
-      const streamUrl = `/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}&v=${Date.now()}`;
-      setResolvedUrl(streamUrl);
-      
-      setTimeout(() => setIsLoading(false), 200);
-    } else {
-      // Embed Mode logic handled in render
-      setResolvedUrl(null);
-      setErrorMessage(null);
-      setIsLoading(false);
-    }
-    
-    lastTimeRef.current = 0;
-    retryCountRef.current = 0;
+    setIsLoading(true);
+    setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}&v=${Date.now()}`);
+    setTimeout(() => setIsLoading(false), 200);
   }, [currentTrack, playerMode]);
 
-  // 2. Playback Control (Normal Mode Only)
+  // 2. Media Session API (Untuk Kontrol di Notifikasi HP)
   useEffect(() => {
-    if (playerMode !== 'normal') return;
+    if ('mediaSession' in navigator && currentTrack) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.info.title,
+        artist: currentTrack.info.author,
+        artwork: [
+          { src: currentTrack.info.artworkUrl || '', sizes: '512x512', type: 'image/png' }
+        ]
+      });
+
+      navigator.mediaSession.setActionHandler('play', resume);
+      navigator.mediaSession.setActionHandler('pause', pause);
+      navigator.mediaSession.setActionHandler('nexttrack', next);
+    }
+  }, [currentTrack, resume, pause, next]);
+
+  // 3. Playback Control
+  useEffect(() => {
     const video = videoRef.current;
     if (!video || isLoading || !resolvedUrl) return;
     
     if (isPlaying) {
-      video.play().catch(err => {
-        if (err.name === 'NotAllowedError') {
-          setNeedsInteraction(true);
-        } else {
-          setErrorMessage("Gagal memutar audio");
-        }
-      });
+      video.play().catch(() => {});
     } else {
       video.pause();
     }
-  }, [isPlaying, resolvedUrl, isLoading, playerMode]);
+  }, [isPlaying, resolvedUrl, isLoading]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.volume = volume;
   }, [volume]);
 
-  // 3. Reconnect Logic (Normal Mode Only)
-  const handleReconnect = useCallback(() => {
-    if (playerMode !== 'normal') return;
-    const video = videoRef.current;
-    if (!video || !currentTrack || retryCountRef.current >= 5) {
-      if (retryCountRef.current >= 5) setErrorMessage("Koneksi gagal.");
-      return;
-    }
-
-    setIsReconnecting(true);
-    const currentTime = video.currentTime || lastTimeRef.current;
-    lastTimeRef.current = currentTime;
-
-    const newUrl = `/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}&retry=${Date.now()}`;
-    setResolvedUrl(newUrl);
-
-    const onCanPlay = () => {
-      video.currentTime = currentTime;
-      video.play().catch(() => setNeedsInteraction(true));
-      setIsReconnecting(false);
-      setErrorMessage(null);
-      video.removeEventListener('canplay', onCanPlay);
-    };
-
-    video.addEventListener('canplay', onCanPlay);
-    video.load();
-    retryCountRef.current += 1;
-  }, [currentTrack, playerMode]);
+  const formatTime = (s: number) => {
+    const mins = Math.floor(s / 60);
+    const secs = Math.floor(s % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (video && video.currentTime > 0) {
+    if (video) {
       setProgress((video.currentTime / video.duration) * 100);
-      lastTimeRef.current = video.currentTime;
+      setCurrentTime(video.currentTime);
+      setDuration(video.duration);
     }
   };
 
-  if (!currentTrack) {
-    return (
-      <div className="fixed bottom-0 left-0 right-0 h-20 bg-zinc-900/90 backdrop-blur-md border-t border-zinc-800 flex items-center px-4 text-zinc-500 z-50">
-        Pilih lagu dari playlist...
-      </div>
-    );
-  }
+  if (!currentTrack) return null;
 
-  const embedUrl = `https://www.youtube-nocookie.com/embed/${currentTrack.info.identifier}?autoplay=1&modestbranding=1&rel=0`;
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${currentTrack.info.identifier}?autoplay=1&modestbranding=1`;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 min-h-[6rem] bg-black/95 backdrop-blur-xl border-t border-zinc-800 flex flex-col items-center z-50">
+    <div className={`fixed bottom-0 left-0 right-0 z-50 transition-all duration-500 ${
+      uiMode === 'compact' ? 'h-14 bg-black/80' : 'h-24 bg-zinc-900/95'
+    } backdrop-blur-xl border-t border-zinc-800`}>
       
-      {/* Mode Settings Overlay */}
-      {showSettings && (
-        <div className="absolute bottom-24 right-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-2xl z-[60] w-64">
-          <h3 className="text-white font-bold mb-3 text-sm">Pengaturan Player</h3>
-          <div className="space-y-2">
-            <button 
-              onClick={() => { setPlayerMode('normal'); setShowSettings(false); }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between ${playerMode === 'normal' ? 'bg-pink-500 text-white' : 'text-zinc-400 hover:bg-zinc-800'}`}
-            >
-              <span>Mode Normal (Streaming)</span>
-              {playerMode === 'normal' && <div className="w-2 h-2 bg-white rounded-full"></div>}
-            </button>
-            <button 
-              onClick={() => { setPlayerMode('embed'); setShowSettings(false); }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between ${playerMode === 'embed' ? 'bg-pink-500 text-white' : 'text-zinc-400 hover:bg-zinc-800'}`}
-            >
-              <span>Mode Embed (YouTube Player)</span>
-              {playerMode === 'embed' && <div className="w-2 h-2 bg-white rounded-full"></div>}
-            </button>
-          </div>
-          <p className="mt-3 text-[10px] text-zinc-500 leading-tight">
-            *Mode Embed lebih stabil tapi mungkin memerlukan klik manual pada video untuk mulai memutar.
-          </p>
-        </div>
-      )}
+      {/* Progress Bar (Global) */}
+      <div className="absolute top-0 left-0 w-full h-1 bg-zinc-800">
+        <div className="h-full bg-pink-500 transition-all duration-300" style={{ width: `${progress}%` }}></div>
+      </div>
 
-      {/* Main Player UI */}
-      <div className="w-full h-full flex flex-col sm:flex-row items-center px-4 py-2 justify-between">
+      <div className="max-w-7xl mx-auto h-full flex items-center px-4 justify-between relative">
         
-        {/* Hidden/Embed Element */}
-        {playerMode === 'normal' ? (
+        {/* Render Audio Engine */}
+        {playerMode === 'normal' && (
           <video
             ref={videoRef}
             src={resolvedUrl || undefined}
             onTimeUpdate={handleTimeUpdate}
-            onEnded={() => next()}
-            onError={() => setTimeout(handleReconnect, 3000)}
-            onStalled={handleReconnect}
+            onEnded={next}
             className="hidden"
             playsInline
           />
-        ) : (
-          <div className="fixed -top-full left-0 opacity-0 pointer-events-none">
-            {/* We keep embed hidden but present for audio if needed, 
-                though embed mode usually needs to be visible to be interacted with */}
-          </div>
         )}
 
-        {/* Track Info */}
-        <div className="flex items-center w-full sm:w-1/3">
-          <div className="relative group">
-            {currentTrack.info.artworkUrl ? (
-              <img src={currentTrack.info.artworkUrl} alt="Cover" className="h-12 w-12 sm:h-14 sm:w-14 rounded-md mr-3 object-cover shadow-lg" />
-            ) : (
-              <div className="h-12 w-12 sm:h-14 sm:w-14 bg-zinc-800 rounded-md mr-3 flex items-center justify-center">🎵</div>
-            )}
-            {isReconnecting && <RefreshCw size={16} className="absolute inset-0 m-auto text-white animate-spin" />}
+        {/* LEFT: Info Lagu */}
+        <div className="flex items-center w-1/3 overflow-hidden">
+          {uiMode !== 'compact' && (
+            <div className="relative mr-3 flex-shrink-0">
+              <img 
+                src={currentTrack.info.artworkUrl || ''} 
+                className={`w-14 h-14 rounded-lg object-cover shadow-2xl ${isPlaying ? 'animate-pulse' : ''}`} 
+                alt="cover"
+              />
+            </div>
+          )}
+          <div className="truncate">
+            <h4 className="text-white text-sm font-bold truncate">{currentTrack.info.title}</h4>
+            <p className="text-zinc-400 text-xs truncate">{currentTrack.info.author}</p>
+          </div>
+        </div>
+
+        {/* CENTER: Kontrol Utama */}
+        <div className="flex flex-col items-center w-1/3">
+          <div className="flex items-center space-x-5">
+            <button onClick={() => isPlaying ? pause() : resume()} className="bg-white text-black p-2.5 rounded-full hover:scale-110 transition active:scale-95 shadow-lg">
+              {isPlaying ? <Pause size={20} fill="black" /> : <Play size={20} fill="black" className="ml-0.5" />}
+            </button>
+            <button onClick={next} className="text-zinc-400 hover:text-white transition">
+              <SkipForward size={22} fill="currentColor" />
+            </button>
+          </div>
+          {uiMode === 'standard' && (
+            <div className="flex items-center space-x-2 mt-2 text-[10px] text-zinc-500 font-mono">
+              <span>{formatTime(currentTime)}</span>
+              <div className="w-32 h-1 bg-zinc-800 rounded-full">
+                 <div className="h-full bg-zinc-600 rounded-full" style={{ width: `${progress}%` }}></div>
+              </div>
+              <span>{formatTime(duration || 0)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Pengaturan & Mode */}
+        <div className="flex items-center w-1/3 justify-end space-x-3">
+          <div className="hidden md:flex items-center space-x-2 mr-2">
+            <Volume2 size={16} className="text-zinc-400" />
+            <input 
+              type="range" min="0" max="1" step="0.1" value={volume} 
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-16 accent-pink-500 h-1 bg-zinc-800 rounded-lg appearance-none"
+            />
           </div>
           
-          <div className="overflow-hidden flex-1">
-            <div className="text-white text-sm font-bold truncate flex items-center">
-              {currentTrack.info.title}
-              <a href={currentTrack.info.uri} target="_blank" rel="noopener noreferrer" className="ml-2 text-zinc-500 hover:text-white">
-                <ExternalLink size={12} />
-              </a>
+          <div className="flex bg-zinc-800/50 p-1 rounded-lg">
+            <button onClick={() => setUiMode('compact')} className={`p-1.5 rounded ${uiMode === 'compact' ? 'bg-pink-500 text-white' : 'text-zinc-500'}`} title="Compact Mode">
+              <Minimize2 size={16} />
+            </button>
+            <button onClick={() => setUiMode('standard')} className={`p-1.5 rounded ${uiMode === 'standard' ? 'bg-pink-500 text-white' : 'text-zinc-500'}`} title="Standard Mode">
+              <Layout size={16} />
+            </button>
+            <button onClick={() => setUiMode('theater')} className={`p-1.5 rounded ${uiMode === 'theater' ? 'bg-pink-500 text-white' : 'text-zinc-500'}`} title="Theater Mode">
+              <Monitor size={16} />
+            </button>
+          </div>
+
+          <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded-full ${showSettings ? 'bg-pink-500 text-white' : 'text-zinc-400 hover:bg-zinc-800'}`}>
+            <Settings size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* THEATER MODE / EMBED PANEL */}
+      {uiMode === 'theater' && (
+        <div className={`absolute bottom-full right-4 mb-4 transition-all duration-500 ${isEmbedVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-2xl w-80">
+            <div className="bg-zinc-800 px-3 py-2 flex justify-between items-center">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">YouTube Engine</span>
+              <button onClick={() => setIsEmbedVisible(false)} className="text-zinc-400 hover:text-white">
+                <ChevronDown size={16} />
+              </button>
             </div>
-            <div className="text-zinc-400 text-xs truncate">
+            <div className="aspect-video bg-black">
               {playerMode === 'embed' ? (
-                <span className="text-pink-400 flex items-center"><Video size={10} className="mr-1" /> Mode Embed Aktif</span>
+                <iframe src={embedUrl} className="w-full h-full" allow="autoplay; encrypted-media" />
               ) : (
-                errorMessage ? <span className="text-red-400">{errorMessage}</span> : currentTrack.info.author
+                <div className="w-full h-full flex flex-col items-center justify-center text-zinc-600 text-[10px] text-center p-4">
+                  <Monitor size={24} className="mb-2 opacity-20" />
+                  Ganti ke Mode Embed di Settings untuk melihat Video
+                </div>
               )}
             </div>
           </div>
         </div>
+      )}
 
-        {/* Center Controls & Special Embed UI */}
-        <div className="flex flex-col items-center w-full sm:w-1/3 my-2 sm:my-0">
-          {playerMode === 'embed' ? (
-            <div className="flex flex-col items-center">
-               <div className="w-full max-w-[320px] aspect-video mb-2 bg-black rounded-lg overflow-hidden border border-zinc-800">
-                  <iframe 
-                    src={embedUrl}
-                    className="w-full h-full"
-                    allow="autoplay; encrypted-media"
-                    allowFullScreen
-                  ></iframe>
-               </div>
-               <div className="flex items-center space-x-4">
-                  <button onClick={next} className="bg-zinc-800 text-white px-4 py-2 rounded-full text-xs font-bold flex items-center">
-                    Skip Lagu <SkipForward size={14} className="ml-2" />
-                  </button>
-               </div>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center space-x-6">
-                <button 
-                  onClick={() => isPlaying ? pause() : resume()} 
-                  className={`h-10 w-10 sm:h-12 sm:w-12 rounded-full flex items-center justify-center transition shadow-xl ${needsInteraction ? 'bg-pink-500 text-white animate-bounce' : 'bg-white text-black hover:scale-105'}`}
-                >
-                  {isReconnecting ? <RefreshCw size={20} className="animate-spin" /> : (isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />)}
-                </button>
-                <button onClick={next} className="text-zinc-400 hover:text-white transition p-2">
-                  <SkipForward size={24} fill="currentColor" />
-                </button>
-              </div>
-              <div className="hidden sm:flex w-full max-w-md mt-2 items-center space-x-2">
-                <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-pink-500" style={{ width: `${progress || 0}%` }}></div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+      {/* Floating Button to show embed if hidden */}
+      {uiMode === 'theater' && !isEmbedVisible && (
+        <button 
+          onClick={() => setIsEmbedVisible(true)}
+          className="absolute bottom-full right-4 mb-4 bg-pink-500 text-white p-3 rounded-full shadow-lg animate-bounce"
+        >
+          <ChevronUp size={20} />
+        </button>
+      )}
 
-        {/* Right Section: Volume & Settings */}
-        <div className="flex items-center w-full sm:w-1/3 justify-end space-x-4">
-          <div className="hidden sm:flex items-center space-x-2">
-            <Volume2 size={18} className="text-zinc-400" />
-            <input 
-              type="range" min="0" max="1" step="0.01" value={volume} 
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="w-20 accent-pink-500 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-            />
+      {/* SETTINGS MENU */}
+      {showSettings && (
+        <div className="absolute bottom-full right-4 mb-4 bg-zinc-900 border border-zinc-800 p-4 rounded-xl shadow-2xl w-64 z-[60]">
+          <h3 className="text-white font-bold mb-3 text-xs uppercase tracking-tighter">Engine Selection</h3>
+          <div className="space-y-2">
+            <button 
+              onClick={() => setPlayerMode('normal')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs ${playerMode === 'normal' ? 'bg-pink-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+            >
+              <span>Normal (Auto Play)</span>
+              {playerMode === 'normal' && <div className="w-1.5 h-1.5 bg-white rounded-full"></div>}
+            </button>
+            <button 
+              onClick={() => setPlayerMode('embed')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs ${playerMode === 'embed' ? 'bg-pink-500 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+            >
+              <span>Embed (Stabil/Video)</span>
+              {playerMode === 'embed' && <div className="w-1.5 h-1.5 bg-white rounded-full"></div>}
+            </button>
           </div>
-          <button 
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-2 rounded-lg transition ${showSettings ? 'bg-pink-500 text-white' : 'text-zinc-400 hover:bg-zinc-800'}`}
-          >
-            <Settings size={20} />
-          </button>
+          <div className="mt-4 pt-4 border-t border-zinc-800">
+             <p className="text-[10px] text-zinc-500 leading-tight">
+               *Mode Normal mendukung background play.<br/>
+               *Mode Theater mendukung tampilan video.
+             </p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
