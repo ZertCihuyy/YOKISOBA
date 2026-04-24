@@ -20,10 +20,11 @@ export async function GET(req: NextRequest) {
 
     if (!format) throw new Error('No audio found');
 
-    // Mendukung Range Header agar player bisa resume/sambung otomatis
     const range = req.headers.get('range');
+    const contentLength = format.content_length ? Number(format.content_length) : 0;
+    
     let start = 0;
-    let end = format.content_length ? parseInt(format.content_length) - 1 : undefined;
+    let end = contentLength > 0 ? contentLength - 1 : undefined;
 
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");
@@ -58,16 +59,16 @@ export async function GET(req: NextRequest) {
     });
 
     const status = range ? 206 : 200;
-    const headers: any = {
+    const headers: Record<string, string> = {
       'Content-Type': 'audio/mpeg',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache',
       'Transfer-Encoding': 'chunked',
     };
 
-    if (range && format.content_length) {
-      headers['Content-Range'] = `bytes ${start}-${end}/${format.content_length}`;
-      headers['Content-Length'] = (end! - start + 1).toString();
+    if (range && contentLength > 0) {
+      headers['Content-Range'] = `bytes ${start}-${end}/${contentLength}`;
+      headers['Content-Length'] = (Number(end) - start + 1).toString();
     }
 
     return new NextResponse(webStream, { status, headers });
