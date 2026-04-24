@@ -32,6 +32,7 @@ export interface PlayerState {
   status: 'Disconnected' | 'Connecting...' | 'Connected' | 'Reconnecting...';
   activeUsername: string;
   viewerCount: number;
+  playerMode: 'normal' | 'embed';
   
   play: (track: LavalinkTrack) => void;
   pause: () => void;
@@ -45,6 +46,7 @@ export interface PlayerState {
   clearChat: () => void;
   setActiveUsername: (username: string) => void;
   setViewerCount: (count: number) => void;
+  setPlayerMode: (mode: 'normal' | 'embed') => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -59,6 +61,7 @@ export const usePlayerStore = create<PlayerState>()(
       status: 'Disconnected',
       activeUsername: '',
       viewerCount: 0,
+      playerMode: 'normal',
 
       play: (track) => set((state) => {
         const history = { ...state.history };
@@ -129,10 +132,17 @@ export const usePlayerStore = create<PlayerState>()(
       setActiveUsername: (username) => set({ activeUsername: username }),
       
       setViewerCount: (viewerCount) => set({ viewerCount }),
+
+      setPlayerMode: (playerMode) => set({ playerMode }),
     }),
     {
       name: 'yakisoba-player-storage',
-      partialize: (state) => ({ history: state.history, volume: state.volume, activeUsername: state.activeUsername }),
+      partialize: (state) => ({ 
+        history: state.history, 
+        volume: state.volume, 
+        activeUsername: state.activeUsername,
+        playerMode: state.playerMode
+      }),
     }
   )
 );
