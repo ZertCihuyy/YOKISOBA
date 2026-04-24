@@ -155,14 +155,14 @@ export default function Home() {
       </div>
 
       {/* Right Sidebar - TikTok & Queue */}
-      <div className="w-full lg:w-[400px] bg-black border-t lg:border-t-0 lg:border-l border-zinc-800 flex flex-col h-[60vh] lg:h-full shadow-2xl relative z-10 order-1 lg:order-2 lg:pb-20 flex-shrink-0">
+      <div className="w-full lg:w-[400px] bg-black border-t lg:border-t-0 lg:border-l border-zinc-800 flex flex-col h-[70vh] lg:h-full shadow-2xl relative z-10 order-1 lg:order-2 lg:pb-20 flex-shrink-0">
         {/* TikTok Panel */}
-        <div className="h-1/2 lg:h-[55%] p-4 lg:p-6 border-b border-zinc-800 flex flex-col bg-zinc-950 overflow-hidden">
+        <div className="h-[70%] lg:h-[70%] p-4 lg:p-6 border-b border-zinc-800 flex flex-col bg-zinc-950 overflow-hidden">
           <TikTokLivePanel />
         </div>
 
         {/* Queue */}
-        <div className="h-1/2 lg:h-[45%] p-4 lg:p-6 flex flex-col bg-zinc-900/20 overflow-hidden">
+        <div className="h-[30%] lg:h-[30%] p-4 lg:p-6 flex flex-col bg-zinc-900/20 overflow-hidden">
           <h2 className="text-lg lg:text-xl font-black mb-3 lg:mb-4 flex-shrink-0 tracking-tight">Up Next</h2>
           <div className="flex-1 overflow-y-auto space-y-2 lg:space-y-3 pr-2">
             {currentTrack && (

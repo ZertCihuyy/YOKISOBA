@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import youtubedl from 'youtube-dl-exec';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 45;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -12,44 +13,44 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1. Get the raw stream URL from YouTube (via youtubedl)
-    // Cast to any to bypass the restrictive type definitions of youtube-dl-exec
+    // Fetch metadata
     const output = await youtubedl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
-      format: 'bestaudio',
+      format: 'bestaudio/best',
+      youtubeSkipDashManifest: true,
     }) as any;
 
     if (!output || typeof output !== 'object' || !output.url) {
       return new NextResponse('No suitable audio stream found', { status: 404 });
     }
 
-    // 2. Fetch the stream from YouTube with proper headers to avoid 403
+    // Proxy the stream to avoid IP-bound URL issues and 403 Forbidden
     const response = await fetch(output.url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.youtube.com/',
       },
     });
 
     if (!response.ok || !response.body) {
+      // If proxy fails, try one last redirect as fallback
       return NextResponse.redirect(output.url);
     }
 
-    // 3. Stream the response back to the client
-    const { readable, writable } = new TransformStream();
-    response.body.pipeTo(writable).catch(err => console.error('Pipe error:', err));
-
-    return new NextResponse(readable, {
+    // Stream the data back with proper CORS and content type
+    return new NextResponse(response.body, {
       headers: {
-        'Content-Type': 'audio/webm',
+        'Content-Type': response.headers.get('Content-Type') || 'audio/mpeg',
+        'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Transfer-Encoding': 'chunked',
       },
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Streaming error:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    return new NextResponse(`Error resolving audio: ${error.message}`, { status: 500 });
   }
 }

@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { WebcastPushConnection } from 'tiktok-live-connector';
 import { searchLavalink } from '../../../lib/lavalink';
 
-// Store connections globally in development so they aren't lost on hot-reload
-const globalConnections: Record<string, WebcastPushConnection> = {};
+const globalConnections = new Map<string, WebcastPushConnection>();
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60; 
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -19,92 +21,78 @@ export async function GET(req: NextRequest) {
       const sendEvent = (event: string, data: any) => {
         try {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-        } catch (e) {
-          // Ignore enqueue errors if stream is closed
-        }
+        } catch (e) {}
       };
 
+      let tiktokConn: WebcastPushConnection | null = null;
+
       try {
-        // Disconnect existing if any to prevent conflicts
-        if (globalConnections[username]) {
-          try {
-            globalConnections[username].disconnect();
-          } catch(e) {}
-          delete globalConnections[username];
+        if (globalConnections.has(username)) {
+          const old = globalConnections.get(username);
+          old?.disconnect();
+          globalConnections.delete(username);
         }
 
-        console.log(`[TikTok] Connecting to ${username}...`);
-        
-        const tiktokLiveConnection = new WebcastPushConnection(username, {
-          processInitialData: false,
-          enableExtendedGiftInfo: false,
+        tiktokConn = new WebcastPushConnection(username, {
           enableWebsocketUpgrade: true,
-          requestPollingIntervalMs: 2000,
-          clientParams: {
-            "app_language": "id-ID",
-            "device_platform": "web"
+          requestPollingIntervalMs: 5000,
+          clientParams: { 
+            "app_language": "id-ID", 
+            "device_platform": "web",
+            "aid": 1988 // Add AID for better connection stability
           }
         });
         
-        globalConnections[username] = tiktokLiveConnection;
+        globalConnections.set(username, tiktokConn);
 
-        await tiktokLiveConnection.connect();
-        console.log(`[TikTok] Connected to ${username}`);
-        sendEvent('connected', { message: `Connected to ${username}'s live stream` });
+        // Wrap connect in a timeout
+        const connectPromise = tiktokConn.connect();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 15000)
+        );
 
-        tiktokLiveConnection.on('chat', async (data) => {
-          const text = data.comment;
-          if (text.startsWith('!play ')) {
-            const query = text.replace('!play ', '').trim();
-            sendEvent('chat', { user: data.uniqueId, comment: text, isCommand: true });
-            
-            // Search via Lavalink
-            try {
-              const results = await searchLavalink(query);
-              if (results && results.length > 0) {
-                const track = results[0];
-                sendEvent('track_found', { user: data.uniqueId, track });
-              } else {
-                sendEvent('tiktok_error', { message: `Could not find song: ${query}` });
-              }
-            } catch (err) {
-              console.error('[Lavalink] Search failed', err);
+        await Promise.race([connectPromise, timeoutPromise]);
+        
+        sendEvent('connected', { message: `Connected to ${username}` });
+
+        tiktokConn.on('chat', async (data) => {
+          if (data.comment.startsWith('!play ')) {
+            const query = data.comment.replace('!play ', '').trim();
+            sendEvent('chat', { user: data.uniqueId, comment: data.comment, isCommand: true });
+            const results = await searchLavalink(query);
+            if (results?.length > 0) {
+              sendEvent('track_found', { user: data.uniqueId, track: results[0] });
+            } else {
+              sendEvent('tiktok_error', { message: `Song not found: ${query}` });
             }
           } else {
-            sendEvent('chat', { user: data.uniqueId, comment: text, isCommand: false });
+            sendEvent('chat', { user: data.uniqueId, comment: data.comment, isCommand: false });
           }
         });
 
-        tiktokLiveConnection.on('streamEnd', () => {
-          console.log(`[TikTok] Stream ended for ${username}`);
-          sendEvent('ended', { message: 'Stream ended' });
-          try { controller.close(); } catch(e) {}
+        tiktokConn.on('error', (err) => {
+          console.error('[TikTok Error]', err);
+          sendEvent('tiktok_error', { message: err.message || 'Stream connection issue' });
         });
 
-        tiktokLiveConnection.on('error', (err) => {
-          console.error(`[TikTok] Connection error for ${username}:`, err);
-          sendEvent('tiktok_error', { message: err.message || 'Connection error' });
-        });
-
-        tiktokLiveConnection.on('disconnected', () => {
-             console.log(`[TikTok] Disconnected from ${username}`);
-             sendEvent('tiktok_error', { message: 'Disconnected from TikTok' });
-             try { controller.close(); } catch(e) {}
-        });
-
-        req.signal.addEventListener('abort', () => {
-          console.log(`[TikTok] Client aborted connection for ${username}`);
-          if (globalConnections[username]) {
-             globalConnections[username].disconnect();
-             delete globalConnections[username];
-          }
+        tiktokConn.on('streamEnd', () => {
+          sendEvent('ended', { message: 'Live ended' });
+          controller.close();
         });
 
       } catch (err: any) {
-        console.error(`[TikTok] Failed to connect to ${username}:`, err);
-        sendEvent('tiktok_error', { message: err.toString() || 'Failed to connect' });
-        try { controller.close(); } catch(e) {}
+        console.error('[TikTok Connection Failed]', err);
+        const errorMsg = err.message?.includes('not found') 
+          ? 'Username not found or invalid.' 
+          : 'User might be offline or stream is private.';
+        sendEvent('tiktok_error', { message: errorMsg });
+        controller.close();
       }
+
+      req.signal.addEventListener('abort', () => {
+        tiktokConn?.disconnect();
+        if (username) globalConnections.delete(username);
+      });
     }
   });
 

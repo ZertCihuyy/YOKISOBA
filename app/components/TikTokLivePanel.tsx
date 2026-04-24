@@ -100,18 +100,7 @@ export default function TikTokLivePanel() {
     const handleDisconnect = (reason: string) => {
       setStatus('Disconnected');
       es.close();
-      
-      // Auto Reconnect Logic (max 5 times)
-      if (reconnectAttempts < 5) {
-        addChat({ user: 'System', comment: `${reason}. Auto reconnect in 5s... (${reconnectAttempts + 1}/5)`, isCommand: false });
-        const nextAttempt = reconnectAttempts + 1;
-        setReconnectAttempts(nextAttempt);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connect(nextAttempt);
-        }, 5000);
-      } else {
-        addChat({ user: 'System', comment: `${reason}. Max reconnect attempts reached. Please manually reconnect.`, isCommand: false });
-      }
+      addChat({ user: 'System', comment: `${reason}. Please reconnect manually.`, isCommand: false });
     };
 
     es.addEventListener('tiktok_error', (e) => {

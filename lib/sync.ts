@@ -9,23 +9,30 @@ export function useBroadcastState(username: string) {
     let timeoutId: NodeJS.Timeout;
     
     // Throttle the sync to prevent spamming the API
+    let lastStateStr = '';
     const syncState = () => {
       const state = usePlayerStore.getState();
+      const stateToSync = {
+        currentTrack: state.currentTrack,
+        queue: state.queue,
+        chat: state.chat,
+        status: state.status,
+      };
+      
+      const stateStr = JSON.stringify(stateToSync);
+      if (stateStr === lastStateStr) return; // Skip if no change
+      lastStateStr = stateStr;
+
       fetch(`/api/state/${encodeURIComponent(username)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          currentTrack: state.currentTrack,
-          queue: state.queue,
-          chat: state.chat,
-          status: state.status,
-        }),
+        body: stateStr,
       }).catch(e => console.error('Failed to sync state:', e));
     };
 
     const unsubscribe = usePlayerStore.subscribe(() => {
       clearTimeout(timeoutId);
-      timeoutId = setTimeout(syncState, 500); // 500ms debounce
+      timeoutId = setTimeout(syncState, 1000); // 1s debounce
     });
 
     // Initial sync
@@ -56,7 +63,7 @@ export function useReceiveState(username: string) {
       } catch (e) {
         console.error('Failed to poll state:', e);
       }
-    }, 1000); // Poll every 1 second
+    }, 2000); // Poll every 2 seconds (optimized for Vercel)
 
     return () => clearInterval(interval);
   }, [username]);
