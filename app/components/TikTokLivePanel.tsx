@@ -48,6 +48,10 @@ export default function TikTokLivePanel() {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }
+    
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
 
     setActiveUsername(usernameInput);
     setStatus(retryCount > 0 ? 'Reconnecting...' : 'Connecting...');

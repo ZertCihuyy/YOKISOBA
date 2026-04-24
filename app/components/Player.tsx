@@ -53,6 +53,12 @@ export default function Player() {
         src={streamUrl}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
+        onError={(e) => {
+          console.error("Audio error:", e);
+          // Auto-skip if the track fails to load
+          setTimeout(() => next(), 2000);
+        }}
+        preload="auto"
       />
       
       {/* Track Info */}
