@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
                 const track = results[0];
                 sendEvent('track_found', { user: data.uniqueId, track });
               } else {
-                sendEvent('error', { message: `Could not find song: ${query}` });
+                sendEvent('tiktok_error', { message: `Could not find song: ${query}` });
               }
             } catch (err) {
               console.error('[Lavalink] Search failed', err);
@@ -83,12 +83,12 @@ export async function GET(req: NextRequest) {
 
         tiktokLiveConnection.on('error', (err) => {
           console.error(`[TikTok] Connection error for ${username}:`, err);
-          sendEvent('error', { message: err.message || 'Connection error' });
+          sendEvent('tiktok_error', { message: err.message || 'Connection error' });
         });
 
         tiktokLiveConnection.on('disconnected', () => {
              console.log(`[TikTok] Disconnected from ${username}`);
-             sendEvent('error', { message: 'Disconnected from TikTok' });
+             sendEvent('tiktok_error', { message: 'Disconnected from TikTok' });
              try { controller.close(); } catch(e) {}
         });
 
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
 
       } catch (err: any) {
         console.error(`[TikTok] Failed to connect to ${username}:`, err);
-        sendEvent('error', { message: err.toString() || 'Failed to connect' });
+        sendEvent('tiktok_error', { message: err.toString() || 'Failed to connect' });
         try { controller.close(); } catch(e) {}
       }
     }

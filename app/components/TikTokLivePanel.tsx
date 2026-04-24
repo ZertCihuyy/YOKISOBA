@@ -53,6 +53,9 @@ export default function TikTokLivePanel() {
       window.speechSynthesis.cancel();
     }
 
+    // Capture the time when we started connecting
+    const connectionStartTime = Date.now();
+
     setActiveUsername(usernameInput);
     setStatus(retryCount > 0 ? 'Reconnecting...' : 'Connecting...');
     if (retryCount === 0) clearChat();
@@ -67,7 +70,7 @@ export default function TikTokLivePanel() {
     });
 
     es.addEventListener('chat', (e) => {
-      const data = JSON.parse(e.data);
+      const data = JSON.parse((e as MessageEvent).data);
       
       // Bad Word Filter
       if (filterEnabled && containsBadWord(data.comment)) {
@@ -75,14 +78,19 @@ export default function TikTokLivePanel() {
       }
 
       addChat(data);
-      if (!data.isCommand && data.user !== 'System') {
+      
+      // Only speak if the connection is established and it's not a historical message
+      // We add a 2-second buffer from the start of connection to ignore 'late' messages
+      const isNewMessage = Date.now() - connectionStartTime > 3000;
+
+      if (!data.isCommand && data.user !== 'System' && isNewMessage) {
         const textToSpeak = readUsername ? `${data.user} bilang ${data.comment}` : data.comment;
         speak(textToSpeak);
       }
     });
 
     es.addEventListener('track_found', (e) => {
-      const data = JSON.parse(e.data);
+      const data = JSON.parse((e as MessageEvent).data);
       addToQueue(data.track);
       addChat({ user: 'System', comment: `🎵 Added ${data.track.info.title} (Requested by ${data.user})`, isCommand: true });
       const requestText = readUsername ? `Lagu ditambahkan oleh ${data.user}` : `Lagu ditambahkan ke antrean`;
@@ -106,9 +114,9 @@ export default function TikTokLivePanel() {
       }
     };
 
-    es.addEventListener('error', (e) => {
+    es.addEventListener('tiktok_error', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const data = JSON.parse((e as MessageEvent).data);
         console.error('TikTok Error:', data.message);
         
         // Don't auto-reconnect if the user is clearly not live or invalid username
@@ -119,10 +127,14 @@ export default function TikTokLivePanel() {
         } else {
           handleDisconnect(`Error: ${data.message}`);
         }
-      } catch {
-        console.error('Connection closed by server');
-        handleDisconnect('Connection lost');
+      } catch (err) {
+        console.error('Error parsing tiktok_error:', err);
       }
+    });
+
+    es.addEventListener('error', (e) => {
+      console.error('EventSource connection lost');
+      handleDisconnect('Connection lost');
     });
 
     es.addEventListener('ended', () => {
