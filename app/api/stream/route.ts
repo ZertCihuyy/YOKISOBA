@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import youtubedl from 'youtube-dl-exec';
+import { spawn } from 'child_process';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -12,31 +11,54 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Missing URL parameter', { status: 400 });
   }
 
+  // Security check: Only allow YouTube URLs
+  if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+    return new NextResponse('Invalid URL or Not Supported', { status: 403 });
+  }
+
   try {
-    // 1. Get raw info from YouTube
-    const output = await youtubedl(url, {
-      dumpSingleJson: true,
-      noCheckCertificates: true,
-      preferFreeFormats: true,
-      // Priority: m4a > any audio
-      format: 'bestaudio[ext=m4a]/bestaudio/best',
-      youtubeSkipDashManifest: true,
-    }) as any;
+    const ytdlp = spawn('yt-dlp', [
+      '-f', 'bestaudio',
+      '--limit-rate', '10M', // Prevent bandwidth abuse
+      '-o', '-',
+      url
+    ]);
 
-    if (!output || !output.url) {
-      return new NextResponse('Could not resolve stream URL', { status: 404 });
-    }
+    const stream = new ReadableStream({
+      start(controller) {
+        ytdlp.stdout.on('data', (chunk) => {
+          try {
+            controller.enqueue(chunk);
+          } catch (e) {}
+        });
 
-    // 2. Return URL as JSON for the client player
-    if (req.headers.get('accept')?.includes('application/json')) {
-      return NextResponse.json({ url: output.url });
-    }
+        ytdlp.stdout.on('end', () => {
+          try { controller.close(); } catch (e) {}
+        });
 
-    // 3. Fallback to direct redirect with modern headers
-    return NextResponse.redirect(output.url, {
-      status: 307,
+        ytdlp.on('error', (err) => {
+          console.error('yt-dlp error:', err);
+          try { controller.error(err); } catch (e) {}
+        });
+
+        ytdlp.on('close', () => {
+           try { controller.close(); } catch (e) {}
+        });
+
+        // If the client disconnects, kill yt-dlp to save resources
+        req.signal.addEventListener('abort', () => {
+          ytdlp.kill('SIGTERM');
+        });
+      },
+      cancel() {
+        ytdlp.kill('SIGTERM');
+      }
+    });
+
+    return new NextResponse(stream, {
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       }
     });

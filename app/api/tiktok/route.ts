@@ -18,15 +18,33 @@ export async function GET(req: NextRequest) {
   username = username.replace(/^@/, '').trim();
 
   const encoder = new TextEncoder();
+  let isClosed = false;
+
   const stream = new ReadableStream({
     async start(controller) {
+      const safeClose = () => {
+        if (!isClosed) {
+          isClosed = true;
+          try { controller.close(); } catch (e) {}
+        }
+      };
+
       const sendEvent = (event: string, data: any) => {
+        if (isClosed) return;
         try {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-        } catch (e) {}
+        } catch (e) {
+          safeClose();
+        }
       };
 
       let tiktokConn: WebcastPushConnection | null = null;
+
+      req.signal.addEventListener('abort', () => {
+        tiktokConn?.disconnect();
+        if (username) globalConnections.delete(username);
+        safeClose();
+      });
 
       try {
         if (globalConnections.has(username)) {
@@ -144,12 +162,12 @@ export async function GET(req: NextRequest) {
 
         tiktokConn.on('streamEnd', () => {
           sendEvent('ended', { message: 'Live telah berakhir.' });
-          controller.close();
+          safeClose();
         });
 
       } catch (err: any) {
         sendEvent('tiktok_error', { message: 'Gagal menyambung. Pastikan akun sedang Live.' });
-        controller.close();
+        safeClose();
       }
 
       req.signal.addEventListener('abort', () => {

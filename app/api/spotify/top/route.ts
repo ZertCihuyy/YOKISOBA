@@ -5,10 +5,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // Riffy-Spotify supports resolving spotify links. 
-    // We can use a search query for "top hits" or a specific playlist.
-    // For "Top Songs", we'll fetch a popular global chart.
-    const results = await searchLavalink("https://open.spotify.com/playlist/37i9dQZEVXbMDoHDwK2YIq");
+    // Instead of a direct Spotify link which has DRM issues, 
+    // we search for the "Top Global Songs" on YouTube.
+    const results = await searchLavalink("Top Global Songs 2026");
     
     return NextResponse.json(results);
   } catch (error) {

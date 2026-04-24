@@ -15,6 +15,7 @@
     "react-dom": "19.2.4",
     "riffy": "^1.0.12",
     "riffy-spotify": "^1.0.2",
+    "shoukaku": "^4.3.0",
     "tiktok-live-connector": "^2.1.1-beta1",
     "youtube-dl-exec": "^3.1.5",
     "zustand": "^5.0.12"

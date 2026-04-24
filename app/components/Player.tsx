@@ -18,26 +18,10 @@ export default function Player() {
       return;
     }
 
-    const resolve = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`, {
-          headers: { 'Accept': 'application/json' }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setResolvedUrl(data.url);
-        } else {
-          setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`);
-        }
-      } catch (e) {
-        setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    resolve();
+    setIsLoading(true);
+    setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`);
+    // Give the video element a tiny bit of time to register the new src
+    setTimeout(() => setIsLoading(false), 100);
   }, [currentTrack]);
 
   useEffect(() => {
