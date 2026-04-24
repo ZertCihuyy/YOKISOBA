@@ -4,8 +4,16 @@ import { LavalinkTrack } from '../lib/lavalink';
 
 export interface ChatMessage {
   user: string;
+  nickname: string;
+  avatar: string;
   comment: string;
   isCommand: boolean;
+  type: 'chat' | 'gift' | 'member' | 'like' | 'sticker';
+  giftData?: {
+    name: string;
+    count: number;
+    image: string;
+  };
 }
 
 export interface PlayHistory {
@@ -22,7 +30,8 @@ export interface PlayerState {
   history: Record<string, PlayHistory>;
   chat: ChatMessage[];
   status: 'Disconnected' | 'Connecting...' | 'Connected' | 'Reconnecting...';
-  activeUsername: string; // Add active username to link to overlays
+  activeUsername: string;
+  viewerCount: number;
   
   play: (track: LavalinkTrack) => void;
   pause: () => void;
@@ -35,6 +44,7 @@ export interface PlayerState {
   setStatus: (status: 'Disconnected' | 'Connecting...' | 'Connected' | 'Reconnecting...') => void;
   clearChat: () => void;
   setActiveUsername: (username: string) => void;
+  setViewerCount: (count: number) => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -48,6 +58,7 @@ export const usePlayerStore = create<PlayerState>()(
       chat: [],
       status: 'Disconnected',
       activeUsername: '',
+      viewerCount: 0,
 
       play: (track) => set((state) => {
         const history = { ...state.history };
@@ -108,7 +119,7 @@ export const usePlayerStore = create<PlayerState>()(
       },
       
       addChat: (msg) => set((state) => ({ 
-        chat: [...state.chat, msg].slice(-100) // Keep last 100 
+        chat: [...state.chat, msg].slice(-100) 
       })),
       
       setStatus: (status) => set({ status }),
@@ -116,6 +127,8 @@ export const usePlayerStore = create<PlayerState>()(
       clearChat: () => set({ chat: [] }),
 
       setActiveUsername: (username) => set({ activeUsername: username }),
+      
+      setViewerCount: (viewerCount) => set({ viewerCount }),
     }),
     {
       name: 'yakisoba-player-storage',

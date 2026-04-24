@@ -9,11 +9,13 @@ export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const username = searchParams.get('username');
+  let username = searchParams.get('username');
 
   if (!username) {
     return new NextResponse('Username required', { status: 400 });
   }
+
+  username = username.replace(/^@/, '').trim();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -35,57 +37,118 @@ export async function GET(req: NextRequest) {
 
         tiktokConn = new WebcastPushConnection(username, {
           enableWebsocketUpgrade: true,
+          processInitialData: false,
           requestPollingIntervalMs: 5000,
           clientParams: { 
             "app_language": "id-ID", 
-            "device_platform": "web",
-            "aid": 1988 // Add AID for better connection stability
+            "device_platform": "web", 
+            "aid": 1988 
           }
         });
         
         globalConnections.set(username, tiktokConn);
 
-        // Wrap connect in a timeout
-        const connectPromise = tiktokConn.connect();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 15000)
-        );
+        await tiktokConn.connect();
+        sendEvent('connected', { message: `Connected to @${username}` });
 
-        await Promise.race([connectPromise, timeoutPromise]);
-        
-        sendEvent('connected', { message: `Connected to ${username}` });
-
+        // CHAT EVENT
         tiktokConn.on('chat', async (data) => {
-          if (data.comment.startsWith('!play ')) {
+          const isCommand = data.comment.startsWith('!play ');
+          const msg = {
+            user: data.uniqueId,      // @username
+            nickname: data.nickname,  // Display Name
+            avatar: data.profilePictureUrl,
+            comment: data.comment,
+            isCommand,
+            type: 'chat'
+          };
+          sendEvent('chat', msg);
+
+          if (isCommand) {
             const query = data.comment.replace('!play ', '').trim();
-            sendEvent('chat', { user: data.uniqueId, comment: data.comment, isCommand: true });
             const results = await searchLavalink(query);
             if (results?.length > 0) {
-              sendEvent('track_found', { user: data.uniqueId, track: results[0] });
-            } else {
-              sendEvent('tiktok_error', { message: `Song not found: ${query}` });
+              // Priority: Use uniqueId (@username) for the announcement as requested
+              sendEvent('track_found', { user: `@${data.uniqueId}`, track: results[0] });
             }
-          } else {
-            sendEvent('chat', { user: data.uniqueId, comment: data.comment, isCommand: false });
           }
         });
 
+        // GIFT EVENT
+        tiktokConn.on('gift', (data) => {
+          // repeatEnd ensures we only show the final total for streaks
+          if (data.repeatEnd) {
+            sendEvent('chat', {
+              user: data.uniqueId,
+              nickname: data.nickname,
+              avatar: data.profilePictureUrl,
+              comment: `mengirim ${data.giftName} x${data.repeatCount}`,
+              type: 'gift',
+              isCommand: false,
+              giftData: {
+                name: data.giftName,
+                count: data.repeatCount,
+                image: data.giftPictureUrl
+              }
+            });
+          }
+        });
+
+        // JOIN EVENT (MEMBER)
+        tiktokConn.on('member', (data) => {
+          sendEvent('chat', {
+            user: data.uniqueId,
+            nickname: data.nickname,
+            avatar: data.profilePictureUrl,
+            comment: `baru saja bergabung!`,
+            type: 'member',
+            isCommand: false
+          });
+        });
+
+        // LIKE EVENT
+        tiktokConn.on('like', (data) => {
+          // Throttled: only show if they send more than 50 likes to avoid spam
+          if (data.likeCount >= 50) {
+            sendEvent('chat', {
+              user: data.uniqueId,
+              nickname: data.nickname,
+              avatar: data.profilePictureUrl,
+              comment: `memberikan ${data.likeCount} like!`,
+              type: 'like',
+              isCommand: false
+            });
+          }
+        });
+
+        // SOCIAL EVENT (SHARE/FOLLOW)
+        tiktokConn.on('social', (data) => {
+          sendEvent('chat', {
+            user: data.uniqueId,
+            nickname: data.nickname,
+            avatar: data.profilePictureUrl,
+            comment: data.displayType === 'pm_mt_guidance_share' ? 'membagikan Live ini!' : 'mengikuti DJ!',
+            type: 'member',
+            isCommand: false
+          });
+        });
+
+        // VIEWERS UPDATE
+        tiktokConn.on('roomUser', (data) => {
+          sendEvent('room_update', { viewerCount: data.viewerCount });
+        });
+
         tiktokConn.on('error', (err) => {
-          console.error('[TikTok Error]', err);
-          sendEvent('tiktok_error', { message: err.message || 'Stream connection issue' });
+          sendEvent('tiktok_error', { message: 'Koneksi TikTok bermasalah...' });
         });
 
         tiktokConn.on('streamEnd', () => {
-          sendEvent('ended', { message: 'Live ended' });
+          sendEvent('ended', { message: 'Live telah berakhir.' });
           controller.close();
         });
 
       } catch (err: any) {
-        console.error('[TikTok Connection Failed]', err);
-        const errorMsg = err.message?.includes('not found') 
-          ? 'Username not found or invalid.' 
-          : 'User might be offline or stream is private.';
-        sendEvent('tiktok_error', { message: errorMsg });
+        sendEvent('tiktok_error', { message: 'Gagal menyambung. Pastikan akun sedang Live.' });
         controller.close();
       }
 
