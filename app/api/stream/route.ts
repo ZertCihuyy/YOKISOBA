@@ -20,24 +20,32 @@ export async function GET(req: NextRequest) {
 
     if (!format) throw new Error('No audio found');
 
-    const range = req.headers.get('range');
+    const rangeHeader = req.headers.get('range');
     const contentLength = format.content_length ? Number(format.content_length) : 0;
     
-    let start = 0;
-    let end = contentLength > 0 ? contentLength - 1 : undefined;
-
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      start = parseInt(parts[0], 10);
-      if (parts[1]) end = parseInt(parts[1], 10);
-    }
-
-    const stream = await info.download({
+    // Konfigurasi download dasar
+    const downloadOptions: any = {
       type: 'audio',
       quality: 'best',
       format: 'mp4',
-      range: { start, end }
-    });
+    };
+
+    // Logika Range yang lebih ketat untuk TypeScript
+    if (rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : (contentLength > 0 ? contentLength - 1 : undefined);
+
+      if (!isNaN(start)) {
+        if (end !== undefined && !isNaN(end)) {
+          downloadOptions.range = { start, end };
+        } else {
+          downloadOptions.range = { start };
+        }
+      }
+    }
+
+    const stream = await info.download(downloadOptions);
 
     const reader = stream.getReader();
     const webStream = new ReadableStream({
@@ -58,7 +66,7 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const status = range ? 206 : 200;
+    const status = rangeHeader ? 206 : 200;
     const headers: Record<string, string> = {
       'Content-Type': 'audio/mpeg',
       'Accept-Ranges': 'bytes',
@@ -66,9 +74,11 @@ export async function GET(req: NextRequest) {
       'Transfer-Encoding': 'chunked',
     };
 
-    if (range && contentLength > 0) {
+    if (rangeHeader && contentLength > 0) {
+      const start = downloadOptions.range?.start || 0;
+      const end = downloadOptions.range?.end || (contentLength - 1);
       headers['Content-Range'] = `bytes ${start}-${end}/${contentLength}`;
-      headers['Content-Length'] = (Number(end) - start + 1).toString();
+      headers['Content-Length'] = (end - start + 1).toString();
     }
 
     return new NextResponse(webStream, { status, headers });
