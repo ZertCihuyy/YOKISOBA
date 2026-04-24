@@ -1,7 +1,4 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { Innertube } from 'youtubei.js';
 
 export interface LavalinkTrack {
   encoded: string;
@@ -38,7 +35,6 @@ async function resolveSpotifyMetadata(url: string): Promise<string[]> {
       const res = await fetch(`https://api.spotifydown.com/metadata/playlist/${playlistMatch[1]}`).then(r => r.json());
       return res.tracks.map((t: any) => `${t.name} ${t.artists[0].name} official audio`);
     } else if (albumMatch) {
-      // For albums, we can use similar logic if the API supports it
       const res = await fetch(`https://api.spotifydown.com/metadata/album/${albumMatch[1]}`).then(r => r.json());
       return res.tracks.map((t: any) => `${t.name} ${t.artists[0].name} official audio`);
     }
@@ -53,6 +49,7 @@ async function resolveSpotifyMetadata(url: string): Promise<string[]> {
  */
 export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
   try {
+    const youtube = await Innertube.create();
     let searchQueries = [query];
 
     // 1. Check if it's a Spotify URL
@@ -66,32 +63,24 @@ export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
     const allResults: LavalinkTrack[] = [];
 
     // 2. Search each query on YouTube
-    for (const q of searchQueries.slice(0, 10)) { // Limit to 10 for safety
-      const isUrl = q.startsWith("http");
-      const ytQuery = isUrl ? q : `ytsearch1:${q}`;
-      
+    for (const q of searchQueries.slice(0, 5)) { // Limit to 5 for serverless speed
       try {
-        const { stdout } = await execAsync(`yt-dlp "${ytQuery}" --flat-playlist --dump-json`);
-        const lines = stdout.split('\n').filter(l => l.trim() !== '');
-        
-        for (const line of lines) {
-          const data = JSON.parse(line);
-          const thumbnail = data.thumbnails && data.thumbnails.length > 0 
-            ? data.thumbnails[data.thumbnails.length - 1].url 
-            : (data.thumbnail || `https://i.ytimg.com/vi/${data.id}/hqdefault.jpg`);
+        const results = await youtube.search(q, { type: 'video' });
+        const videos = results.videos.as(Innertube.Helpers.YTNodes.Video);
 
+        for (const video of videos) {
           allResults.push({
             encoded: '',
             info: {
-              identifier: data.id,
+              identifier: video.id,
               isSeekable: true,
-              author: data.uploader || data.channel || 'Unknown',
-              length: (data.duration || 0) * 1000,
-              isStream: data.is_live || data.live_status === 'is_live' || false,
+              author: video.author.name || 'Unknown',
+              length: (video.duration.seconds || 0) * 1000,
+              isStream: video.is_live || false,
               position: 0,
-              title: data.title,
-              uri: data.url || data.webpage_url || `https://www.youtube.com/watch?v=${data.id}`,
-              artworkUrl: thumbnail,
+              title: video.title.text || '',
+              uri: `https://www.youtube.com/watch?v=${video.id}`,
+              artworkUrl: video.thumbnails[0]?.url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`,
               isrc: null,
               sourceName: 'youtube'
             },
@@ -112,7 +101,7 @@ export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
 export async function getLavalinkStatus() {
   return {
     online: true,
-    latency: '0ms (yt-dlp Bridge)',
-    version: 'yt-dlp-spotify-resolver'
+    latency: '0ms (Serverless Bridge)',
+    version: 'youtubei-spotify-resolver'
   };
 }

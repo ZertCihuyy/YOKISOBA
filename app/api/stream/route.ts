@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import { Innertube } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,45 +17,43 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const ytdlp = spawn('yt-dlp', [
-      '-f', 'bestaudio',
-      '--limit-rate', '10M', // Prevent bandwidth abuse
-      '-o', '-',
-      url
-    ]);
+    const youtube = await Innertube.create();
+    const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
 
-    const stream = new ReadableStream({
-      start(controller) {
-        ytdlp.stdout.on('data', (chunk) => {
-          try {
-            controller.enqueue(chunk);
-          } catch (e) {}
-        });
+    if (!videoId) {
+      throw new Error('Invalid YouTube URL');
+    }
 
-        ytdlp.stdout.on('end', () => {
-          try { controller.close(); } catch (e) {}
-        });
+    const info = await youtube.getInfo(videoId);
+    const format = info.chooseFormat({ type: 'audio', quality: 'best' });
 
-        ytdlp.on('error', (err) => {
-          console.error('yt-dlp error:', err);
-          try { controller.error(err); } catch (e) {}
-        });
+    if (!format) {
+      throw new Error('No audio format found');
+    }
 
-        ytdlp.on('close', () => {
-           try { controller.close(); } catch (e) {}
-        });
+    const stream = await info.download({
+      type: 'audio',
+      quality: 'best',
+      format: 'mp4'
+    });
 
-        // If the client disconnects, kill yt-dlp to save resources
-        req.signal.addEventListener('abort', () => {
-          ytdlp.kill('SIGTERM');
-        });
+    // Convert ReadableStream to Web ReadableStream for Next.js response
+    const reader = stream.getReader();
+    const webStream = new ReadableStream({
+      async start(controller) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+        controller.close();
       },
       cancel() {
-        ytdlp.kill('SIGTERM');
+        reader.cancel();
       }
     });
 
-    return new NextResponse(stream, {
+    return new NextResponse(webStream, {
       headers: {
         'Content-Type': 'audio/mpeg',
         'Transfer-Encoding': 'chunked',

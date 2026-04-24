@@ -18,6 +18,7 @@
     "shoukaku": "^4.3.0",
     "tiktok-live-connector": "^2.1.1-beta1",
     "youtube-dl-exec": "^3.1.5",
+    "youtubei.js": "^17.0.1",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
