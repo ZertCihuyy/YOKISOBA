@@ -13,42 +13,36 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // RESOLVE: Use youtube-dl-exec with better fallback formats
+    // 1. Get raw info from YouTube
     const output = await youtubedl(url, {
       dumpSingleJson: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
+      // Priority: m4a > any audio
       format: 'bestaudio[ext=m4a]/bestaudio/best',
       youtubeSkipDashManifest: true,
     }) as any;
 
     if (!output || !output.url) {
-      return new NextResponse('Audio source resolution failed', { status: 404 });
+      return new NextResponse('Could not resolve stream URL', { status: 404 });
     }
 
-    // CORS & SECURITY HEADERS
-    const responseHeaders = new Headers();
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-    // Return the resolved URL as JSON for the client-side player
-    // This is much safer than server-side proxying which usually leads to timeouts
+    // 2. Return URL as JSON for the client player
     if (req.headers.get('accept')?.includes('application/json')) {
-      return NextResponse.json({ 
-        url: output.url,
-        title: output.title,
-        duration: output.duration 
-      });
+      return NextResponse.json({ url: output.url });
     }
 
-    // Direct redirect fallback
+    // 3. Fallback to direct redirect with modern headers
     return NextResponse.redirect(output.url, {
       status: 307,
-      headers: responseHeaders,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      }
     });
 
   } catch (error: any) {
-    console.error('[Stream API Error]', error);
+    console.error('Streaming Error:', error);
     return new NextResponse(`Streaming error: ${error.message}`, { status: 500 });
   }
 }

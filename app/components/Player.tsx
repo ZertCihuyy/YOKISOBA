@@ -6,11 +6,12 @@ import { Play, Pause, SkipForward, Volume2 } from 'lucide-react';
 
 export default function Player() {
   const { currentTrack, isPlaying, play, pause, resume, next, volume, setVolume } = usePlayerStore();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // We resolve the stream URL on the client to avoid redirect issues in some browsers
+  // We resolve the stream URL on the client
   useEffect(() => {
     if (!currentTrack) {
       setResolvedUrl(null);
@@ -18,6 +19,7 @@ export default function Player() {
     }
 
     const resolve = async () => {
+      setIsLoading(true);
       try {
         const res = await fetch(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`, {
           headers: { 'Accept': 'application/json' }
@@ -26,11 +28,12 @@ export default function Player() {
           const data = await res.json();
           setResolvedUrl(data.url);
         } else {
-          // Fallback to direct redirect if JSON fails
           setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`);
         }
       } catch (e) {
         setResolvedUrl(`/api/stream?url=${encodeURIComponent(currentTrack.info.uri)}`);
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -38,26 +41,31 @@ export default function Player() {
   }, [currentTrack]);
 
   useEffect(() => {
-    if (!audioRef.current) return;
+    const video = videoRef.current;
+    if (!video || isLoading) return;
     
     if (isPlaying && resolvedUrl) {
-      audioRef.current.play().catch(e => {
-        console.error("Playback failed, might need user interaction", e);
-      });
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => {
+          console.warn("Playback prevented, waiting for interaction", e);
+        });
+      }
     } else {
-      audioRef.current.pause();
+      video.pause();
     }
-  }, [isPlaying, resolvedUrl, currentTrack]);
+  }, [isPlaying, resolvedUrl, currentTrack, isLoading]);
 
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
     }
   }, [volume]);
 
   const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100);
+    const video = videoRef.current;
+    if (video) {
+      setProgress((video.currentTime / video.duration) * 100);
     }
   };
 
@@ -75,24 +83,26 @@ export default function Player() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 h-20 bg-zinc-900 border-t border-zinc-800 flex items-center px-4 justify-between z-50">
-      <audio
-        ref={audioRef}
-        src={resolvedUrl || null}
+      {/* Using hidden video instead of audio for better YouTube compatibility */}
+      <video
+        ref={videoRef}
+        src={resolvedUrl || undefined}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
+        className="hidden"
+        playsInline
         onError={(e) => {
-          const audio = audioRef.current;
-          console.error("Audio error details:", {
-            code: audio?.error?.code,
-            message: audio?.error?.message,
+          const video = videoRef.current;
+          console.error("Media error details:", {
+            code: video?.error?.code,
+            message: video?.error?.message,
           });
           
-          if (audio?.error?.code === 4 || audio?.error?.code === 3) {
-            console.warn("Source error, skipping...");
+          if (video?.error?.code === 4 || video?.error?.code === 3) {
+            console.warn("Persistent media error, auto-skipping...");
             setTimeout(() => next(), 2000);
           }
         }}
-        preload="auto"
       />
       
       {/* Track Info */}

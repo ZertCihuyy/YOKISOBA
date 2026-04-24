@@ -1,3 +1,6 @@
+import { Riffy } from "riffy";
+import { Spotify } from "riffy-spotify";
+
 export interface LavalinkTrack {
   encoded: string;
   info: {
@@ -17,51 +20,64 @@ export interface LavalinkTrack {
   userData: any;
 }
 
-interface LavalinkLoadResult {
-  loadType: 'track' | 'playlist' | 'search' | 'empty' | 'error';
-  data: any; // Context specific data
+// Singleton for Riffy Manager
+let riffy: Riffy | null = null;
+
+export function getRiffy() {
+  if (riffy) return riffy;
+
+  const host = process.env.LAVALINK_HOST || 'lavalink.jirayu.net';
+  const port = parseInt(process.env.LAVALINK_PORT || '13592');
+  const password = process.env.LAVALINK_PASSWORD || 'youshallnotpass';
+  const secure = process.env.LAVALINK_SECURE === 'true';
+
+  const spotify = new Spotify({
+    clientId: process.env.SPOTIFY_CLIENT_ID || "",
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET || ""
+  });
+
+  riffy = new Riffy({
+    nodes: [
+      {
+        host,
+        port,
+        password,
+        secure,
+      },
+    ],
+    send: (payload) => {
+        // Not used in web-search mode but required by constructor
+    },
+    plugins: [spotify]
+  });
+
+  return riffy;
 }
 
 export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
-  const host = process.env.LAVALINK_HOST || 'lavalinkv4.serenetia.com';
-  const port = process.env.LAVALINK_PORT || '443';
-  const password = process.env.LAVALINK_PASSWORD || 'https://seretia.link/discord';
-  const secure = process.env.LAVALINK_SECURE === 'true';
-
-  const protocol = secure ? 'https' : 'http';
-  // Use ytsearch by default if no prefix is provided
-  const identifier = query.includes('http') || query.includes(':search:') ? query : `ytsearch:${query}`;
+  const manager = getRiffy();
   
-  const url = `${protocol}://${host}:${port}/v4/loadtracks?identifier=${encodeURIComponent(identifier)}`;
-
+  // Ensure we use ytsearch for strings that aren't URLs
+  const identifier = query.startsWith("http") ? query : `ytsearch:${query}`;
+  
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': password,
-        'Client-Name': 'Yakisoba-Web/1.0.0'
-      },
-      // Removed caching to ensure fresh results always, fixing stale Lavalink data issues.
-      cache: 'no-store'
-    });
+    const result = await manager.resolve({ query: identifier });
 
-    if (!response.ok) {
-      console.error('Lavalink API Error:', response.statusText);
+    if (!result || result.loadType === "error" || result.loadType === "empty") {
       return [];
     }
 
-    const result: LavalinkLoadResult = await response.json();
+    if (result.loadType === "search" || result.loadType === "track") {
+      return result.data as any[];
+    }
 
-    if (result.loadType === 'search') {
-      return result.data as LavalinkTrack[];
-    } else if (result.loadType === 'track') {
-      return [result.data as LavalinkTrack];
-    } else if (result.loadType === 'playlist') {
-      return result.data.tracks as LavalinkTrack[];
+    if (result.loadType === "playlist") {
+      return result.data.tracks as any[];
     }
 
     return [];
   } catch (error) {
-    console.error('Failed to search Lavalink:', error);
+    console.error("Riffy Resolve Error:", error);
     return [];
   }
 }
