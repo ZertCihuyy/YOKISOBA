@@ -3,16 +3,6 @@ import { Innertube } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
 
-// Reuse instance untuk kecepatan
-let youtube: Innertube | null = null;
-
-async function getYouTube() {
-  if (!youtube) {
-    youtube = await Innertube.create();
-  }
-  return youtube;
-}
-
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const url = searchParams.get('url');
@@ -20,15 +10,17 @@ export async function GET(req: NextRequest) {
   if (!url) return new NextResponse('Missing URL', { status: 400 });
 
   try {
-    const yt = await getYouTube();
+    // Di lingkungan Serverless, lebih aman membuat instance per request 
+    // atau gunakan cache yang sangat hati-hati.
+    const yt = await Innertube.create();
     const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
     
-    if (!videoId) throw new Error('Invalid ID');
+    if (!videoId) throw new Error('ID Video tidak valid');
 
     const info = await yt.getInfo(videoId);
     const format = info.chooseFormat({ type: 'audio', quality: 'best' });
 
-    if (!format) throw new Error('No audio found');
+    if (!format) throw new Error('Format audio tidak ditemukan');
 
     const rangeHeader = req.headers.get('range');
     const contentLength = format.content_length ? Number(format.content_length) : 0;
@@ -51,14 +43,12 @@ export async function GET(req: NextRequest) {
 
     const stream = await info.download(downloadOptions);
 
-    // Kirim stream langsung tanpa membungkus ulang jika memungkinkan
     const status = rangeHeader ? 206 : 200;
     const headers: Record<string, string> = {
-      // Gunakan mime_type asli dari YouTube agar browser bisa memutar dengan benar
       'Content-Type': format.mime_type || 'audio/mp4',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
     };
 
     if (rangeHeader && contentLength > 0) {
@@ -73,7 +63,11 @@ export async function GET(req: NextRequest) {
     return new NextResponse(stream as any, { status, headers });
 
   } catch (error: any) {
-    console.error('Stream API Error:', error);
-    return new NextResponse(`Error: ${error.message}`, { status: 500 });
+    console.error('SERVER_STREAM_ERROR:', error.message);
+    // Kirim pesan error sebagai header agar client bisa membacanya
+    return new NextResponse(null, { 
+      status: 500, 
+      headers: { 'X-Error-Message': error.message || 'Unknown Stream Error' } 
+    });
   }
 }
