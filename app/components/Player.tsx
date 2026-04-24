@@ -54,9 +54,18 @@ export default function Player() {
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
         onError={(e) => {
-          console.error("Audio error:", e);
-          // Auto-skip if the track fails to load
-          setTimeout(() => next(), 2000);
+          const audio = audioRef.current;
+          console.error("Audio error details:", {
+            code: audio?.error?.code,
+            message: audio?.error?.message,
+            src: audio?.src
+          });
+          
+          // Only auto-skip if it's a persistent error (code 4 = source not supported)
+          if (audio?.error?.code === 4 || audio?.error?.code === 3) {
+            console.warn("Persistent audio error, skipping to next track...");
+            setTimeout(() => next(), 3000);
+          }
         }}
         preload="auto"
       />
