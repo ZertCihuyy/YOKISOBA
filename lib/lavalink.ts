@@ -63,24 +63,26 @@ export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
     const allResults: LavalinkTrack[] = [];
 
     // 2. Search each query on YouTube
-    for (const q of searchQueries.slice(0, 5)) { // Limit to 5 for serverless speed
+    for (const q of searchQueries.slice(0, 5)) {
       try {
         const results = await youtube.search(q, { type: 'video' });
-        const videos = results.videos.as(Innertube.Helpers.YTNodes.Video);
+        
+        // Menggunakan cara yang lebih aman untuk memproses hasil pencarian
+        const videos = results.results?.filter((node: any) => node.type === 'Video') || [];
 
-        for (const video of videos) {
+        for (const video of videos as any[]) {
           allResults.push({
             encoded: '',
             info: {
               identifier: video.id,
               isSeekable: true,
-              author: video.author.name || 'Unknown',
-              length: (video.duration.seconds || 0) * 1000,
+              author: video.author?.name || 'Unknown',
+              length: (video.duration?.seconds || 0) * 1000,
               isStream: video.is_live || false,
               position: 0,
-              title: video.title.text || '',
+              title: video.title?.text || video.title || 'Unknown Title',
               uri: `https://www.youtube.com/watch?v=${video.id}`,
-              artworkUrl: video.thumbnails[0]?.url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`,
+              artworkUrl: video.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`,
               isrc: null,
               sourceName: 'youtube'
             },
@@ -88,7 +90,9 @@ export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
             userData: {}
           });
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("Single search error:", e);
+      }
     }
 
     return allResults;
