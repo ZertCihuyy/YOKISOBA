@@ -36,11 +36,16 @@ export function getRiffy() {
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET || ""
   });
 
-  riffy = new Riffy({
-    nodes: [{ host, port: parseInt(port), password, secure }],
-    send: () => {},
-    plugins: [spotify]
-  });
+  riffy = new Riffy(
+    {}, 
+    [{ host, port: parseInt(port), password, secure }],
+    {
+      send: () => {},
+      plugins: [spotify as any],
+      bypassChecks: { nodeFetchInfo: true },
+      restVersion: "v4"
+    }
+  );
 
   return riffy;
 }

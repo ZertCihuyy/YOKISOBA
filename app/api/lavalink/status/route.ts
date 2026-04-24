@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getLavalinkStatus } from '../../../lib/lavalink';
+import { getLavalinkStatus } from '../../../../lib/lavalink';
 
 export const dynamic = 'force-dynamic';
 
