@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
-import { Play, Pause, SkipForward, Volume2, RefreshCw, AlertCircle, ExternalLink, Settings, Youtube } from 'lucide-react';
+import { Play, Pause, SkipForward, Volume2, RefreshCw, AlertCircle, ExternalLink, Settings, Video } from 'lucide-react';
 
 export default function Player() {
   const { 
@@ -191,7 +191,7 @@ export default function Player() {
             </div>
             <div className="text-zinc-400 text-xs truncate">
               {playerMode === 'embed' ? (
-                <span className="text-pink-400 flex items-center"><Youtube size={10} className="mr-1" /> Mode Embed Aktif</span>
+                <span className="text-pink-400 flex items-center"><Video size={10} className="mr-1" /> Mode Embed Aktif</span>
               ) : (
                 errorMessage ? <span className="text-red-400">{errorMessage}</span> : currentTrack.info.author
               )}
