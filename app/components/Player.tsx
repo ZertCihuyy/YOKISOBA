@@ -29,12 +29,15 @@ export default function Player() {
     retryCountRef.current = 0;
   }, [currentTrack]);
 
-  // Kontrol Play/Pause
+  // Kontrol Play/Pause dan Loading
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || isLoading) return;
+    if (!video || isLoading || !resolvedUrl) return;
     
-    if (isPlaying && resolvedUrl) {
+    // Paksa browser untuk memuat ulang source setiap kali URL berubah
+    video.load();
+    
+    if (isPlaying) {
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.catch(e => console.warn("Playback prevented", e));
