@@ -9,11 +9,20 @@ export interface ChatMessage {
   comment: string;
   isCommand: boolean;
   type: 'chat' | 'gift' | 'member' | 'like' | 'sticker';
+  isFollower?: boolean;
   giftData?: {
     name: string;
     count: number;
     image: string;
   };
+}
+
+export interface ReviewRequest {
+  id: string;
+  user: string;
+  nickname: string;
+  content: string;
+  timestamp: number;
 }
 
 export interface PlayerState {
@@ -29,10 +38,21 @@ export interface PlayerState {
   playerMode: 'normal' | 'embed' | 'lavalink';
   uiMode: 'compact' | 'standard' | 'theater';
   
+  // NEW FEATURES
+  permissions: {
+    play: 'all' | 'followers';
+    skip: 'all' | 'followers' | 'admin';
+    rp: 'all' | 'followers';
+  };
+  reviewQueue: ReviewRequest[];
+  fallbackPlaylist: LavalinkTrack[];
+  isFallbackEnabled: boolean;
+  
   play: (track: LavalinkTrack) => void;
   pause: () => void;
   resume: () => void;
   addToQueue: (track: LavalinkTrack) => void;
+  removeFromQueue: (user: string) => void;
   next: () => void;
   setVolume: (volume: number) => void;
   setStatus: (status: string) => void;
@@ -43,6 +63,13 @@ export interface PlayerState {
   addChat: (msg: ChatMessage) => void;
   clearChat: () => void;
   getTopPlayed: () => LavalinkTrack[];
+  
+  // NEW ACTIONS
+  setPermissions: (perms: Partial<PlayerState['permissions']>) => void;
+  addReview: (req: Omit<ReviewRequest, 'id' | 'timestamp'>) => void;
+  clearReviews: () => void;
+  setFallbackPlaylist: (tracks: LavalinkTrack[]) => void;
+  toggleFallback: () => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -59,6 +86,15 @@ export const usePlayerStore = create<PlayerState>()(
       viewerCount: 0,
       playerMode: 'normal',
       uiMode: 'standard',
+      
+      permissions: {
+        play: 'all',
+        skip: 'followers',
+        rp: 'all'
+      },
+      reviewQueue: [],
+      fallbackPlaylist: [],
+      isFallbackEnabled: false,
 
       play: (track) => set((state) => {
         const history = { ...state.history };
@@ -82,10 +118,26 @@ export const usePlayerStore = create<PlayerState>()(
         return { queue: [...state.queue, track] };
       }),
 
+      removeFromQueue: (user) => set((state) => {
+        // Remove the first track requested by this user (or all?)
+        // Let's remove all tracks requested by this user in the queue
+        const newQueue = state.queue.filter(t => t.userData?.requester !== user);
+        return { queue: newQueue };
+      }),
+
       next: () => set((state) => {
-        if (state.queue.length === 0) return { currentTrack: null, isPlaying: false };
-        const [nextTrack, ...rest] = state.queue;
-        return { currentTrack: nextTrack, queue: rest, isPlaying: true };
+        if (state.queue.length > 0) {
+          const [nextTrack, ...rest] = state.queue;
+          return { currentTrack: nextTrack, queue: rest, isPlaying: true };
+        } else if (state.isFallbackEnabled && state.fallbackPlaylist.length > 0) {
+          // Play random or next from fallback playlist
+          // Simple logic: pick random from fallback
+          const randomIndex = Math.floor(Math.random() * state.fallbackPlaylist.length);
+          const nextFallback = state.fallbackPlaylist[randomIndex];
+          return { currentTrack: nextFallback, queue: [], isPlaying: true };
+        } else {
+          return { currentTrack: null, isPlaying: false };
+        }
       }),
 
       setVolume: (volume) => set({ volume }),
@@ -110,16 +162,33 @@ export const usePlayerStore = create<PlayerState>()(
           .filter(t => t !== undefined);
         return tracks;
       },
+
+      setPermissions: (perms) => set((state) => ({
+        permissions: { ...state.permissions, ...perms }
+      })),
+
+      addReview: (req) => set((state) => ({
+        reviewQueue: [...state.reviewQueue, { ...req, id: Math.random().toString(36).substr(2, 9), timestamp: Date.now() }]
+      })),
+
+      clearReviews: () => set({ reviewQueue: [] }),
+
+      setFallbackPlaylist: (tracks) => set({ fallbackPlaylist: tracks }),
+
+      toggleFallback: () => set((state) => ({ isFallbackEnabled: !state.isFallbackEnabled })),
     }),
     {
       name: 'yakisoba-player-storage',
-      // PENTING: Jangan simpan fungsi ke localStorage, hanya data saja.
       partialize: (state) => ({ 
         volume: state.volume, 
         activeUsername: state.activeUsername,
         playerMode: state.playerMode,
         uiMode: state.uiMode,
-        history: state.history
+        history: state.history,
+        permissions: state.permissions,
+        reviewQueue: state.reviewQueue,
+        fallbackPlaylist: state.fallbackPlaylist,
+        isFallbackEnabled: state.isFallbackEnabled
       }),
     }
   )

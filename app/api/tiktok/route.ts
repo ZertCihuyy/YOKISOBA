@@ -71,25 +71,22 @@ export async function GET(req: NextRequest) {
 
         // CHAT EVENT
         tiktokConn.on('chat', async (data) => {
-          const isCommand = data.comment.startsWith('!play ');
+          const isCommand = ['!play', '!skip', '!revoke', '!rp'].some(cmd => data.comment.toLowerCase().startsWith(cmd));
+          
+          // Basic check for follower status if provided by TikTok
+          // If not directly available in standard payload, we fallback to false unless userDetails exist
+          const isFollower = data.userDetails?.isFollower === true || data.isFollower === true || data.followRole === 1 || data.followInfo?.followerCount > 0;
+
           const msg = {
             user: data.uniqueId,      // @username
             nickname: data.nickname,  // Display Name
             avatar: data.profilePictureUrl,
             comment: data.comment,
+            isFollower: !!isFollower,
             isCommand,
             type: 'chat'
           };
           sendEvent('chat', msg);
-
-          if (isCommand) {
-            const query = data.comment.replace('!play ', '').trim();
-            const results = await searchLavalink(query);
-            if (results?.length > 0) {
-              // Priority: Use uniqueId (@username) for the announcement as requested
-              sendEvent('track_found', { user: `@${data.uniqueId}`, track: results[0] });
-            }
-          }
         });
 
         // GIFT EVENT
