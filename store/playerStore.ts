@@ -26,7 +26,7 @@ export interface PlayerState {
   status: string;
   activeUsername: string;
   viewerCount: number;
-  playerMode: 'normal' | 'embed';
+  playerMode: 'normal' | 'embed' | 'lavalink';
   uiMode: 'compact' | 'standard' | 'theater';
   
   play: (track: LavalinkTrack) => void;
@@ -38,7 +38,7 @@ export interface PlayerState {
   setStatus: (status: string) => void;
   setActiveUsername: (username: string) => void;
   setViewerCount: (count: number) => void;
-  setPlayerMode: (mode: 'normal' | 'embed') => void;
+  setPlayerMode: (mode: 'normal' | 'embed' | 'lavalink') => void;
   setUiMode: (mode: 'compact' | 'standard' | 'theater') => void;
   addChat: (msg: ChatMessage) => void;
   clearChat: () => void;
@@ -102,15 +102,18 @@ export const usePlayerStore = create<PlayerState>()(
       clearChat: () => set({ chat: [] }),
 
       getTopPlayed: () => {
-        const { history } = get();
-        return Object.values(history)
-          .sort((a: any, b: any) => b.playCount - a.playCount)
+        const history = get().history || {};
+        const tracks = Object.values(history)
+          .sort((a: any, b: any) => (b.playCount || 0) - (a.playCount || 0))
           .slice(0, 10)
-          .map((h: any) => h.track);
+          .map((h: any) => h.track)
+          .filter(t => t !== undefined);
+        return tracks;
       },
     }),
     {
       name: 'yakisoba-player-storage',
+      // PENTING: Jangan simpan fungsi ke localStorage, hanya data saja.
       partialize: (state) => ({ 
         volume: state.volume, 
         activeUsername: state.activeUsername,

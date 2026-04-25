@@ -1,23 +1,61 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { Innertube } from 'youtubei.js';
+import { NextRequest } from 'next/server';
+import { Innertube, UniversalCache } from 'youtubei.js';
 
 export const dynamic = 'force-dynamic';
+
+let ytInstance: Innertube | null = null;
+
+async function getYt() {
+  if (!ytInstance) {
+    ytInstance = await Innertube.create({
+      cache: new UniversalCache(false),
+      generate_session_locally: true
+    });
+  }
+  return ytInstance;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const url = searchParams.get('url');
 
-  if (!url) return new NextResponse('Missing URL', { status: 400 });
+  if (!url) return new Response('Missing URL', { status: 400 });
+
+  // Jika bukan YouTube, coba pake proxy/redirect (misal Cobalt)
+  if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+    try {
+        const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ url, downloadMode: 'audio' })
+        }).then(r => r.json());
+        
+        if (cobaltRes.url) {
+            return Response.redirect(cobaltRes.url, 302);
+        }
+    } catch (e) {
+        console.error("Non-YouTube stream fallback failed:", e);
+    }
+  }
 
   try {
-    // Di lingkungan Serverless, lebih aman membuat instance per request 
-    // atau gunakan cache yang sangat hati-hati.
-    const yt = await Innertube.create();
-    const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
-    
-    if (!videoId) throw new Error('ID Video tidak valid');
+    const yt = await getYt();
 
-    const info = await yt.getInfo(videoId);
+    let videoId = '';
+    if (url.includes('v=')) {
+      videoId = url.split('v=')[1].split('&')[0];
+    } else if (url.includes('youtu.be/')) {
+      videoId = url.split('youtu.be/')[1].split('?')[0];
+    } else {
+      videoId = url.split('/').pop() || '';
+    }
+
+    if (!videoId || videoId.length !== 11) {
+      return new Response('Invalid Video ID', { status: 400 });
+    }
+
+    // Menggunakan client TV_EMBEDDED yang sangat stabil untuk streaming
+    const info = await yt.getInfo(videoId, 'TV_EMBEDDED');
     const format = info.chooseFormat({ type: 'audio', quality: 'best' });
 
     if (!format) throw new Error('Format audio tidak ditemukan');
@@ -29,13 +67,13 @@ export async function GET(req: NextRequest) {
       type: 'audio',
       quality: 'best',
       format: 'mp4',
+      client: 'TV_EMBEDDED'
     };
 
     if (rangeHeader) {
       const parts = rangeHeader.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : (contentLength > 0 ? contentLength - 1 : undefined);
-
       if (!isNaN(start)) {
         downloadOptions.range = (end !== undefined && !isNaN(end)) ? { start, end } : { start };
       }
@@ -49,6 +87,7 @@ export async function GET(req: NextRequest) {
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Access-Control-Allow-Origin': '*',
+      'X-Content-Duration': (info.basic_info.duration || 0).toString(),
     };
 
     if (rangeHeader && contentLength > 0) {
@@ -60,14 +99,19 @@ export async function GET(req: NextRequest) {
       headers['Content-Length'] = contentLength.toString();
     }
 
-    return new NextResponse(stream as any, { status, headers });
+    return new Response(stream as any, { status, headers });
 
   } catch (error: any) {
-    console.error('SERVER_STREAM_ERROR:', error.message);
-    // Kirim pesan error sebagai header agar client bisa membacanya
-    return new NextResponse(null, { 
-      status: 500, 
-      headers: { 'X-Error-Message': error.message || 'Unknown Stream Error' } 
-    });
+    console.error('STREAM_ERROR:', error.message);
+    // Jika gagal, coba fallback ke ANDROID
+    try {
+        const yt = await getYt();
+        const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
+        const info = await yt!.getInfo(videoId!, 'ANDROID');
+        const stream = await info.download({ type: 'audio', quality: 'best' });
+        return new Response(stream as any, { status: 200, headers: { 'Content-Type': 'audio/mp4' } });
+    } catch (e) {
+        return new Response(null, { status: 500, headers: { 'X-Error-Message': error.message } });
+    }
   }
 }

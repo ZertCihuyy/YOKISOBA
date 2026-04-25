@@ -47,8 +47,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setTopPlayed(getTopPlayed());
-  }, [currentTrack]);
+    if (typeof getTopPlayed === 'function') {
+      setTopPlayed(getTopPlayed());
+    }
+  }, [currentTrack, getTopPlayed]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
