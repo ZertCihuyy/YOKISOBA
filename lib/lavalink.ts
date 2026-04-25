@@ -19,7 +19,15 @@ export interface LavalinkTrack {
   userData: any;
 }
 
-const LAVALINK_HOST = process.env.LAVALINK_HOST || 'http://sg1-nodelink.nyxbot.app:3000';
+function normalizeHost(raw: string | undefined, defaultHost: string) {
+  let host = raw?.trim() || defaultHost;
+  if (!host.startsWith('http://') && !host.startsWith('https://')) {
+    host = `http://${host}`;
+  }
+  return host.replace(/\/+$|\s+$/g, '');
+}
+
+const LAVALINK_HOST = normalizeHost(process.env.LAVALINK_HOST, 'http://sg1-nodelink.nyxbot.app:3000');
 const LAVALINK_PASS = process.env.LAVALINK_PASS || 'nyxbot.app/support';
 
 // Global instance untuk reuse (Singleton)

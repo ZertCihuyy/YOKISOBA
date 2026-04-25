@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePlayerStore } from '../../store/playerStore';
 import { 
   Play, Pause, SkipForward, RefreshCw, 
@@ -8,55 +8,53 @@ import {
   ChevronDown
 } from 'lucide-react';
 
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
+
 export default function Player() {
   const { 
     currentTrack, isPlaying, pause, resume, next, 
     uiMode, setUiMode
   } = usePlayerStore();
   
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isEmbedVisible, setIsEmbedVisible] = useState(true);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
 
-  const [retryCount, setRetryCount] = useState(0);
-  const maxRetries = 10;
+  const playerRef = useRef<any>(null);
+  const videoRef = useRef<HTMLDivElement | null>(null);
+  const loadingTimerRef = useRef<number | null>(null);
+  const pendingPlayRef = useRef(false);
+  const pendingVideoIdRef = useRef<string | null>(null);
 
-  // Resolve URL
   useEffect(() => {
+    if (loadingTimerRef.current) {
+      window.clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+    }
+
     if (!currentTrack) {
-      setResolvedUrl(null);
+      setCurrentVideoId(null);
+      setIsLoading(false);
       return;
     }
 
-    const trackUrl = currentTrack.info.uri || `https://www.youtube.com/watch?v=${currentTrack.info.identifier}`;
-    setResolvedUrl(`/api/stream?url=${encodeURIComponent(trackUrl)}&v=${Date.now()}`);
-    setRetryCount(0);
+    setCurrentVideoId(currentTrack.info.identifier);
     setIsLoading(true);
   }, [currentTrack]);
 
-  // Handle Playback Error & Auto Reconnect
-  const handlePlaybackError = useCallback((e?: any) => {
-    if (retryCount < maxRetries) {
-      const delay = 1000 + (retryCount * 500); // progressive delay
-      console.warn(`Playback error, retrying in ${delay}ms... (Attempt ${retryCount + 1}/${maxRetries})`);
-      setIsLoading(true);
-      
-      setTimeout(() => {
-        setRetryCount(prev => prev + 1);
-        if (currentTrack) {
-           const trackUrl = currentTrack.info.uri || `https://www.youtube.com/watch?v=${currentTrack.info.identifier}`;
-           setResolvedUrl(`/api/stream?url=${encodeURIComponent(trackUrl)}&v=${Date.now() + retryCount}`);
-        }
-      }, delay);
-    } else {
-      console.error("Max retries reached. Moving to next track.");
-      next();
-    }
-  }, [retryCount, currentTrack, next]);
+  // Handle playback error
+  const handlePlaybackError = () => {
+    console.warn('YouTube player error');
+  };
 
   // Media Session Control
   useEffect(() => {
@@ -72,34 +70,136 @@ export default function Player() {
     }
   }, [currentTrack, resume, pause, next]);
 
-  // Playback Logic
+  // Load YouTube API
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !resolvedUrl) return;
-    
-    if (isPlaying) {
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          setIsLoading(false);
-        }).catch((err) => {
-          if (err.name !== 'AbortError') {
-            handlePlaybackError(err);
-          }
-        });
-      }
-    } else {
-      video.pause();
-    }
-  }, [isPlaying, resolvedUrl, handlePlaybackError]);
+    if (!window.YT) {
+      const script = document.createElement('script');
+      script.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(script);
 
-  const handleTimeUpdate = () => {
-    const video = videoRef.current;
-    if (video) {
-      setProgress((video.currentTime / video.duration) * 100);
-      setCurrentTime(video.currentTime);
+      window.onYouTubeIframeAPIReady = () => {
+        if (!playerRef.current && videoRef.current) {
+          playerRef.current = new window.YT.Player(videoRef.current, {
+            height: '100%',
+            width: '100%',
+            videoId: currentVideoId || undefined,
+            playerVars: {
+              autoplay: 0,
+              controls: 1,
+              modestbranding: 1,
+              rel: 0,
+            },
+            events: {
+              onReady: (event: any) => {
+                setPlayerReady(true);
+                setIsLoading(false);
+                if (loadingTimerRef.current) {
+                  window.clearTimeout(loadingTimerRef.current);
+                  loadingTimerRef.current = null;
+                }
+                if (pendingVideoIdRef.current && typeof event.target.loadVideoById === 'function') {
+                  event.target.loadVideoById(pendingVideoIdRef.current);
+                  pendingVideoIdRef.current = null;
+                }
+                if (pendingPlayRef.current && typeof event.target.playVideo === 'function') {
+                  event.target.playVideo();
+                  pendingPlayRef.current = false;
+                }
+              },
+              onStateChange: (event: any) => {
+                if (event.data === window.YT.PlayerState.PLAYING) {
+                  setPlayerReady(true);
+                  setIsLoading(false);
+                  if (loadingTimerRef.current) {
+                    window.clearTimeout(loadingTimerRef.current);
+                    loadingTimerRef.current = null;
+                  }
+                }
+              },
+            },
+          });
+        }
+      };
+    } else if (window.YT && window.YT.Player && !playerRef.current && videoRef.current) {
+      playerRef.current = new window.YT.Player(videoRef.current, {
+        height: '100%',
+        width: '100%',
+        videoId: currentVideoId || undefined,
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          modestbranding: 1,
+          rel: 0,
+        },
+        events: {
+          onReady: (event: any) => {
+            setPlayerReady(true);
+            setIsLoading(false);
+            if (loadingTimerRef.current) {
+              window.clearTimeout(loadingTimerRef.current);
+              loadingTimerRef.current = null;
+            }
+            if (pendingPlayRef.current && typeof event.target.playVideo === 'function') {
+              event.target.playVideo();
+              pendingPlayRef.current = false;
+            }
+          },
+          onStateChange: (event: any) => {
+            if (event.data === window.YT.PlayerState.PLAYING) {
+              setPlayerReady(true);
+              setIsLoading(false);
+              if (loadingTimerRef.current) {
+                window.clearTimeout(loadingTimerRef.current);
+                loadingTimerRef.current = null;
+              }
+            }
+          },
+        },
+      });
     }
-  };
+  }, [currentVideoId]);
+
+  useEffect(() => {
+    if (!playerRef.current || !currentVideoId) return;
+
+    try {
+      const playerInstance = playerRef.current;
+      const currentId = typeof playerInstance.getVideoData === 'function' ? playerInstance.getVideoData().video_id : null;
+
+      if (playerReady) {
+        if (currentId !== currentVideoId && typeof playerInstance.loadVideoById === 'function') {
+          playerInstance.loadVideoById(currentVideoId);
+        }
+
+        if (isPlaying && typeof playerInstance.playVideo === 'function') {
+          playerInstance.playVideo();
+        } else if (!isPlaying && typeof playerInstance.pauseVideo === 'function') {
+          playerInstance.pauseVideo();
+        }
+      } else {
+        pendingVideoIdRef.current = currentVideoId;
+        pendingPlayRef.current = isPlaying;
+      }
+
+      if (loadingTimerRef.current) {
+        window.clearTimeout(loadingTimerRef.current);
+      }
+      loadingTimerRef.current = window.setTimeout(() => {
+        setIsLoading(false);
+        loadingTimerRef.current = null;
+      }, 2000);
+    } catch (e) {
+      console.error('Playback control error:', e);
+    }
+  }, [isPlaying, currentVideoId, playerReady]);
+
+  // const handleTimeUpdate = () => {
+  //   const video = videoRef.current;
+  //   if (video) {
+  //     setProgress((video.currentTime / video.duration) * 100);
+  //     setCurrentTime(video.currentTime);
+  //   }
+  // };
 
   if (!currentTrack) return null;
 
@@ -116,21 +216,12 @@ export default function Player() {
 
       <div className="max-w-7xl mx-auto h-full flex items-center px-4 justify-between relative">
         
-        {/* Hidden Engine */}
-        <video
+        {/* Hidden Engine - YouTube Player */}
+        <div
           ref={videoRef}
-          src={resolvedUrl || undefined}
-          onTimeUpdate={handleTimeUpdate}
-          onEnded={next}
-          onError={handlePlaybackError}
-          onLoadStart={() => setIsLoading(true)}
-          onCanPlay={() => setIsLoading(false)}
-          onPlaying={() => setIsLoading(false)}
-          onStalled={() => setIsLoading(true)}
-          onWaiting={() => setIsLoading(true)}
-          className="hidden"
-          playsInline
-          autoPlay={isPlaying}
+          id="youtube-player"
+          className="absolute w-0 h-0 opacity-0 pointer-events-none overflow-hidden"
+          style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
         />
 
         {/* LEFT: Info */}
@@ -148,11 +239,7 @@ export default function Player() {
           <div className="truncate">
             <h4 className="text-white text-xs sm:text-sm font-bold truncate">{currentTrack.info.title}</h4>
             <p className="text-zinc-500 text-[10px] sm:text-xs truncate font-medium flex items-center">
-              {retryCount > 0 ? (
-                <span className="text-yellow-500 flex items-center">
-                  <RefreshCw size={10} className="animate-spin mr-1" /> Reconnecting ({retryCount})...
-                </span>
-              ) : currentTrack.info.author}
+              {currentTrack.info.author}
             </p>
           </div>
         </div>
