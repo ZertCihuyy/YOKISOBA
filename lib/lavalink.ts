@@ -73,15 +73,15 @@ export async function searchLavalink(query: string): Promise<LavalinkTrack[]> {
     return search.videos.filter(v => v.type === 'Video').map(video => ({
       encoded: '',
       info: {
-        identifier: video.id,
+        identifier: (video as any).id,
         isSeekable: true,
         author: (video as any).author?.name || 'Unknown Artist',
         length: ((video as any).duration?.seconds || 0) * 1000,
         isStream: (video as any).is_live || false,
         position: 0,
         title: (video as any).title?.text || (video as any).title || 'Unknown Title',
-        uri: `https://www.youtube.com/watch?v=${video.id}`,
-        artworkUrl: (video as any).thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`,
+        uri: `https://www.youtube.com/watch?v=${(video as any).id}`,
+        artworkUrl: (video as any).thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${(video as any).id}/hqdefault.jpg`,
         isrc: null,
         sourceName: 'youtube'
       },

@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Menggunakan client TV_EMBEDDED yang sangat stabil untuk streaming
-    const info = await yt.getInfo(videoId, 'TV_EMBEDDED');
+    const info = await yt.getInfo(videoId, { client: 'TV_EMBEDDED' });
     const format = info.chooseFormat({ type: 'audio', quality: 'best' });
 
     if (!format) throw new Error('Format audio tidak ditemukan');
@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
     try {
         const yt = await getYt();
         const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
-        const info = await yt!.getInfo(videoId!, 'ANDROID');
+        const info = await yt!.getInfo(videoId!, { client: 'ANDROID' });
         const stream = await info.download({ type: 'audio', quality: 'best' });
         return new Response(stream as any, { status: 200, headers: { 'Content-Type': 'audio/mp4' } });
     } catch (e) {
