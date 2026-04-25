@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { LavalinkTrack } from '../lib/lavalink';
 
 export interface ChatMessage {
@@ -71,6 +71,17 @@ export interface PlayerState {
   setFallbackPlaylist: (tracks: LavalinkTrack[]) => void;
   toggleFallback: () => void;
 }
+
+const getStorage = () => {
+  if (typeof window === 'undefined') {
+    return {
+      getItem: (_name: string) => null,
+      setItem: (_name: string, _value: string) => {},
+      removeItem: (_name: string) => {},
+    } as Storage;
+  }
+  return localStorage;
+};
 
 export const usePlayerStore = create<PlayerState>()(
   persist(
@@ -175,6 +186,7 @@ export const usePlayerStore = create<PlayerState>()(
     }),
     {
       name: 'yakisoba-player-storage',
+      storage: createJSONStorage(getStorage),
       partialize: (state) => ({ 
         volume: state.volume, 
         activeUsername: state.activeUsername,

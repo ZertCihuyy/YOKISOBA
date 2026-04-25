@@ -12,19 +12,21 @@ const containsBadWord = (text: string) => {
 
 export default function TikTokLivePanel() {
   const [usernameInput, setUsernameInput] = useState('');
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const [filterEnabled, setFilterEnabled] = useState(true);
   const [readUsername, setReadUsername] = useState(true);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [activeTab, setActiveTab] = useState<'chat' | 'settings' | 'review' | 'fallback'>('chat');
   const [fallbackUrl, setFallbackUrl] = useState('');
   const [loadingFallback, setLoadingFallback] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectionStartTimeRef = useRef(Date.now());
   const skipInitialMessagesRef = useRef(true);
   const ttsAudioRefs = useRef<HTMLAudioElement[]>([]);
+  const ttsEnabledRef = useRef(ttsEnabled);
 
   const { 
     addToQueue, removeFromQueue, addChat, setStatus, clearChat, 
@@ -36,10 +38,20 @@ export default function TikTokLivePanel() {
     next
   } = usePlayerStore();
 
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+
   const speak = useCallback(async (text: string) => {
-    if (!ttsEnabled) return;
+    if (!ttsEnabledRef.current) {
+      console.log('TTS disabled, skipping:', text);
+      return;
+    }
     const trimmedText = text.trim();
-    if (!trimmedText || trimmedText.startsWith('!') || trimmedText.length > 200) return;
+    if (!trimmedText || trimmedText.startsWith('!') || trimmedText.length > 200) {
+      console.log('TTS skipped (invalid text):', trimmedText);
+      return;
+    }
+
+    console.log('TTS speaking:', trimmedText);
 
     try {
       const response = await fetch(`/api/tts?text=${encodeURIComponent(trimmedText)}`);
@@ -49,12 +61,14 @@ export default function TikTokLivePanel() {
       }
 
       const audioBlob = await response.blob();
+      console.log('TTS blob received, size:', audioBlob.size);
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       audio.preload = 'auto';
 
       ttsAudioRefs.current.push(audio);
       audio.onended = () => {
+        console.log('TTS audio ended');
         URL.revokeObjectURL(audioUrl);
         ttsAudioRefs.current = ttsAudioRefs.current.filter((item) => item !== audio);
       };
@@ -66,8 +80,11 @@ export default function TikTokLivePanel() {
       };
 
       const playPromise = audio.play();
+      console.log('TTS audio play initiated');
       if (playPromise !== undefined) {
-        playPromise.catch((error) => {
+        playPromise.then(() => {
+          console.log('TTS audio started playing');
+        }).catch((error) => {
           console.error('Audio play blocked:', error);
         });
       }
@@ -76,6 +93,7 @@ export default function TikTokLivePanel() {
 
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
+          console.log('Using speechSynthesis fallback');
           const utterance = new SpeechSynthesisUtterance(trimmedText);
           utterance.lang = 'id-ID';
           utterance.rate = 1.05;
@@ -87,7 +105,7 @@ export default function TikTokLivePanel() {
         }
       }
     }
-  }, [ttsEnabled]);
+  }, []);
 
   const connect = useCallback((retryCount = 0) => {
     if (!usernameInput) return;
@@ -183,6 +201,7 @@ export default function TikTokLivePanel() {
 
       if (data.type === 'chat' && !data.isCommand && isNewMessage) {
         const textToSpeak = readUsername ? `${data.nickname || data.user} bilang: ${data.comment}` : data.comment;
+        console.log('New chat message, calling TTS:', textToSpeak);
         speak(textToSpeak);
       }
     });
@@ -233,9 +252,17 @@ export default function TikTokLivePanel() {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
   };
 
+  const hydratedActiveUsername = hasMounted ? activeUsername : '';
+  const hydratedStatus = hasMounted ? status : 'Disconnected';
+  const reconnectDisabled = hasMounted && (!activeUsername || status === 'Connected');
+
   useEffect(() => {
     if (activeUsername && !usernameInput) setUsernameInput(activeUsername);
   }, [activeUsername]);
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -276,12 +303,12 @@ export default function TikTokLivePanel() {
         <h2 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-pink-500 to-purple-500 tracking-tighter">
           TikTok DJ
         </h2>
-        {status === 'Connected' ? (
+        {hydratedStatus === 'Connected' ? (
           <div className="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full">
             <Users size={14} className="text-pink-500" />
             <span className="text-xs font-black text-white">{viewerCount}</span>
           </div>
-        ) : status === 'Reconnecting...' ? (
+        ) : hydratedStatus === 'Reconnecting...' ? (
           <div className="text-[10px] bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded-full animate-pulse font-bold">
             Reconnect #{reconnectAttempts}
           </div>
@@ -317,7 +344,7 @@ export default function TikTokLivePanel() {
                 placeholder="@username live"
                 className="bg-zinc-900/80 border border-zinc-700 text-white px-4 py-2 rounded-lg flex-1 outline-none focus:ring-2 focus:ring-pink-500 transition-all font-medium"
               />
-              {status === 'Disconnected' ? (
+              {hydratedStatus === 'Disconnected' ? (
                 <button onClick={() => connect(0)} className="bg-pink-600 text-white px-5 py-2 rounded-lg font-bold hover:bg-pink-500 transition-colors">
                   Mulai
                 </button>
@@ -359,7 +386,7 @@ export default function TikTokLivePanel() {
           </div>
 
           <div className="flex-1 overflow-y-auto bg-black/40 rounded-xl p-3 border border-zinc-800/50 space-y-2 mb-3 shadow-inner scrollbar-hide">
-            {chat.length === 0 && (status === 'Disconnected') && (
+            {chat.length === 0 && (hydratedStatus === 'Disconnected') && (
               <div className="h-full flex flex-col items-center justify-center text-zinc-600 italic text-xs">
                 <WifiOff size={24} className="mb-2 opacity-20" />
                 Belum ada koneksi
@@ -379,10 +406,10 @@ export default function TikTokLivePanel() {
           
           <button 
             onClick={() => connect(0)}
-            disabled={!activeUsername || status === 'Connected'}
+            disabled={reconnectDisabled}
             className="w-full flex items-center justify-center space-x-2 bg-zinc-900 border border-zinc-700 text-zinc-300 px-4 py-2 rounded-lg text-xs font-bold hover:bg-zinc-800 transition-colors disabled:opacity-30"
           >
-            <RefreshCw size={14} className={status === 'Reconnecting...' ? 'animate-spin text-pink-500' : ''} />
+            <RefreshCw size={14} className={hydratedStatus === 'Reconnecting...' ? 'animate-spin text-pink-500' : ''} />
             <span>Paksa Sambung Ulang</span>
           </button>
         </>

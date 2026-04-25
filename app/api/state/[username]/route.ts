@@ -16,7 +16,12 @@ export async function POST(
   { params }: { params: Promise<{ username: string }> }
 ) {
   const { username } = await params;
-  const body = await req.json();
+  let body: Record<string, unknown> = {};
+  try {
+    body = await req.json();
+  } catch {
+    // empty or malformed body — treat as empty object
+  }
   states[username] = { ...body, lastUpdate: Date.now() };
   return NextResponse.json({ success: true });
 }

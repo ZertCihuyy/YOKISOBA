@@ -11,9 +11,12 @@ import Link from 'next/link';
 
 export default function Home() {
   const { play, addToQueue, queue, currentTrack, getTopPlayed, activeUsername } = usePlayerStore();
+  const [isMounted, setIsMounted] = useState(false);
   
   // Broadcast state to overlays via our API
   useBroadcastState(activeUsername);
+
+  const hydratedActiveUsername = isMounted ? activeUsername : '';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<LavalinkTrack[]>([]);
@@ -44,6 +47,10 @@ export default function Home() {
     checkStatus();
     const interval = setInterval(checkStatus, 30000); // Check every 30s
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    setIsMounted(true);
   }, []);
 
   useEffect(() => {
@@ -138,13 +145,13 @@ export default function Home() {
           </div>
           
           <div className="flex flex-wrap gap-2 lg:space-x-3">
-            {activeUsername ? (
+            {hydratedActiveUsername ? (
               <>
-                <Link href={`/overlay/${activeUsername}/chat`} target="_blank" className="flex items-center space-x-2 px-3 py-2 bg-pink-500/10 border border-pink-500/30 rounded-lg hover:bg-pink-500/20 transition-colors text-xs lg:text-sm font-bold text-pink-400">
+                <Link href={`/overlay/${hydratedActiveUsername}/chat`} target="_blank" className="flex items-center space-x-2 px-3 py-2 bg-pink-500/10 border border-pink-500/30 rounded-lg hover:bg-pink-500/20 transition-colors text-xs lg:text-sm font-bold text-pink-400">
                   <span>Chat Overlay</span>
                   <ExternalLink size={14} />
                 </Link>
-                <Link href={`/overlay/${activeUsername}/queue`} target="_blank" className="flex items-center space-x-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg hover:bg-green-500/20 transition-colors text-xs lg:text-sm font-bold text-green-400">
+                <Link href={`/overlay/${hydratedActiveUsername}/queue`} target="_blank" className="flex items-center space-x-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg hover:bg-green-500/20 transition-colors text-xs lg:text-sm font-bold text-green-400">
                   <span>Queue Overlay</span>
                   <ExternalLink size={14} />
                 </Link>
