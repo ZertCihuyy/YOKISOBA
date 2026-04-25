@@ -119,8 +119,6 @@ export const usePlayerStore = create<PlayerState>()(
       }),
 
       removeFromQueue: (user) => set((state) => {
-        // Remove the first track requested by this user (or all?)
-        // Let's remove all tracks requested by this user in the queue
         const newQueue = state.queue.filter(t => t.userData?.requester !== user);
         return { queue: newQueue };
       }),
@@ -130,8 +128,6 @@ export const usePlayerStore = create<PlayerState>()(
           const [nextTrack, ...rest] = state.queue;
           return { currentTrack: nextTrack, queue: rest, isPlaying: true };
         } else if (state.isFallbackEnabled && state.fallbackPlaylist.length > 0) {
-          // Play random or next from fallback playlist
-          // Simple logic: pick random from fallback
           const randomIndex = Math.floor(Math.random() * state.fallbackPlaylist.length);
           const nextFallback = state.fallbackPlaylist[randomIndex];
           return { currentTrack: nextFallback, queue: [], isPlaying: true };
@@ -188,7 +184,8 @@ export const usePlayerStore = create<PlayerState>()(
         permissions: state.permissions,
         reviewQueue: state.reviewQueue,
         fallbackPlaylist: state.fallbackPlaylist,
-        isFallbackEnabled: state.isFallbackEnabled
+        isFallbackEnabled: state.isFallbackEnabled,
+        chat: state.chat.slice(-50)
       }),
     }
   )

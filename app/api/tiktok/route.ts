@@ -55,8 +55,8 @@ export async function GET(req: NextRequest) {
 
         tiktokConn = new WebcastPushConnection(username, {
           enableWebsocketUpgrade: true,
-          processInitialData: false,
-          requestPollingIntervalMs: 5000,
+          processInitialData: true,  // Enable to get recent chat history
+          requestPollingIntervalMs: 2000,  // Faster polling
           clientParams: { 
             "app_language": "id-ID", 
             "device_platform": "web", 

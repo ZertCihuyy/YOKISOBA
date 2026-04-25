@@ -23,6 +23,8 @@ export default function TikTokLivePanel() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const connectionStartTimeRef = useRef(Date.now());
+  const skipInitialMessagesRef = useRef(true);
+  const ttsAudioRefs = useRef<HTMLAudioElement[]>([]);
 
   const { 
     addToQueue, removeFromQueue, addChat, setStatus, clearChat, 
@@ -34,15 +36,57 @@ export default function TikTokLivePanel() {
     next
   } = usePlayerStore();
 
-  const speak = useCallback((text: string) => {
-    if (!ttsEnabled || !window.speechSynthesis) return;
-    if (text.startsWith('!') || text.length > 150) return;
+  const speak = useCallback(async (text: string) => {
+    if (!ttsEnabled) return;
+    const trimmedText = text.trim();
+    if (!trimmedText || trimmedText.startsWith('!') || trimmedText.length > 200) return;
 
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'id-ID';
-    utterance.rate = 1.1; 
-    window.speechSynthesis.speak(utterance);
+    try {
+      const response = await fetch(`/api/tts?text=${encodeURIComponent(trimmedText)}`);
+      if (!response.ok) {
+        console.error('TTS API failed:', response.status);
+        throw new Error('TTS API fetch failed');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.preload = 'auto';
+
+      ttsAudioRefs.current.push(audio);
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        ttsAudioRefs.current = ttsAudioRefs.current.filter((item) => item !== audio);
+      };
+
+      audio.onerror = (e) => {
+        console.error('Audio play error:', e);
+        URL.revokeObjectURL(audioUrl);
+        ttsAudioRefs.current = ttsAudioRefs.current.filter((item) => item !== audio);
+      };
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error('Audio play blocked:', error);
+        });
+      }
+    } catch (error) {
+      console.error('TTS failed:', error);
+
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const utterance = new SpeechSynthesisUtterance(trimmedText);
+          utterance.lang = 'id-ID';
+          utterance.rate = 1.05;
+          utterance.onerror = (event) => console.error('SpeechSynthesis error:', event);
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(utterance);
+        } catch (fallbackError) {
+          console.error('SpeechSynthesis fallback failed:', fallbackError);
+        }
+      }
+    }
   }, [ttsEnabled]);
 
   const connect = useCallback((retryCount = 0) => {
@@ -62,6 +106,10 @@ export default function TikTokLivePanel() {
       setStatus('Connected');
       setReconnectAttempts(0);
       connectionStartTimeRef.current = Date.now();
+      skipInitialMessagesRef.current = true;
+      setTimeout(() => {
+        skipInitialMessagesRef.current = false;
+      }, 2000);
       addChat({ 
         user: 'System', nickname: 'System', avatar: '', 
         comment: `Berhasil tersambung ke @${targetUser}`, 
@@ -77,7 +125,7 @@ export default function TikTokLivePanel() {
 
       addChat(data);
       
-      const isNewMessage = Date.now() - connectionStartTimeRef.current > 5000;
+      const isNewMessage = !skipInitialMessagesRef.current;
       
       if (data.isCommand && isNewMessage) {
         const comment = data.comment.toLowerCase();
@@ -193,6 +241,13 @@ export default function TikTokLivePanel() {
     return () => {
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (eventSourceRef.current) eventSourceRef.current.close();
+      ttsAudioRefs.current.forEach((audio) => {
+        audio.pause();
+        if (audio.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audio.src);
+        }
+      });
+      ttsAudioRefs.current = [];
     };
   }, []);
 
