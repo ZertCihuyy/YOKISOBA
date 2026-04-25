@@ -1,18 +1,20 @@
 import { NextRequest } from 'next/server';
-import { Innertube, UniversalCache } from 'youtubei.js';
+import youtubedl from 'youtube-dl-exec';
+import { Readable } from 'stream';
 
 export const dynamic = 'force-dynamic';
 
-let ytInstance: Innertube | null = null;
-
-async function getYt() {
-  if (!ytInstance) {
-    ytInstance = await Innertube.create({
-      cache: new UniversalCache(false),
-      generate_session_locally: true
-    });
-  }
-  return ytInstance;
+function nodeStreamToWeb(nodeStream: import('stream').Readable) {
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on('data', (chunk) => controller.enqueue(chunk));
+      nodeStream.on('end', () => controller.close());
+      nodeStream.on('error', (err) => controller.error(err));
+    },
+    cancel() {
+      nodeStream.destroy();
+    }
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -39,8 +41,6 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const yt = await getYt();
-
     let videoId = '';
     if (url.includes('v=')) {
       videoId = url.split('v=')[1].split('&')[0];
@@ -54,64 +54,55 @@ export async function GET(req: NextRequest) {
       return new Response('Invalid Video ID', { status: 400 });
     }
 
-    // Menggunakan client TV_EMBEDDED yang sangat stabil untuk streaming
-    const info = await yt.getInfo(videoId, { client: 'TV_EMBEDDED' });
-    const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    if (!format) throw new Error('Format audio tidak ditemukan');
+    // Eksekusi yt-dlp (via youtube-dl-exec) dengan cookies
+    const stream = youtubedl.exec(cleanUrl, {
+      output: '-', // Tulis ke stdout
+      format: 'bestaudio',
+      cookies: 'kue-coklat.txt', // Menggunakan cookie root
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+    }, { 
+      stdio: ['ignore', 'pipe', 'ignore'] 
+    });
 
-    const rangeHeader = req.headers.get('range');
-    const contentLength = format.content_length ? Number(format.content_length) : 0;
-    
-    const downloadOptions: any = {
-      type: 'audio',
-      quality: 'best',
-      format: 'mp4',
-      client: 'TV_EMBEDDED'
-    };
-
-    if (rangeHeader) {
-      const parts = rangeHeader.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : (contentLength > 0 ? contentLength - 1 : undefined);
-      if (!isNaN(start)) {
-        downloadOptions.range = (end !== undefined && !isNaN(end)) ? { start, end } : { start };
-      }
+    if (!stream.stdout) {
+      throw new Error("Gagal membuka stream audio dari youtube-dl-exec");
     }
 
-    const stream = await info.download(downloadOptions);
+    // Mengonversi Stream Node.js ke Web ReadableStream untuk Next.js Response
+    const webStream = nodeStreamToWeb(stream.stdout);
 
-    const status = rangeHeader ? 206 : 200;
-    const headers: Record<string, string> = {
-      'Content-Type': format.mime_type || 'audio/mp4',
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Access-Control-Allow-Origin': '*',
-      'X-Content-Duration': (info.basic_info.duration || 0).toString(),
-    };
-
-    if (rangeHeader && contentLength > 0) {
-      const start = downloadOptions.range?.start || 0;
-      const end = downloadOptions.range?.end || (contentLength - 1);
-      headers['Content-Range'] = `bytes ${start}-${end}/${contentLength}`;
-      headers['Content-Length'] = (end - start + 1).toString();
-    } else if (contentLength > 0) {
-      headers['Content-Length'] = contentLength.toString();
-    }
-
-    return new Response(stream as any, { status, headers });
+    return new Response(webStream, { 
+      status: 200, 
+      headers: { 
+        'Content-Type': 'audio/webm', // Secara umum webm/mp4 audio
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Access-Control-Allow-Origin': '*'
+      } 
+    });
 
   } catch (error: any) {
-    console.error('STREAM_ERROR:', error.message);
-    // Jika gagal, coba fallback ke ANDROID
+    console.error('STREAM_ERROR via youtube-dl-exec:', error.message);
+    
+    // Fallback ke Cobalt API (Bypass)
     try {
-        const yt = await getYt();
-        const videoId = url.split('v=')[1]?.split('&')[0] || url.split('/').pop();
-        const info = await yt!.getInfo(videoId!, { client: 'ANDROID' });
-        const stream = await info.download({ type: 'audio', quality: 'best' });
-        return new Response(stream as any, { status: 200, headers: { 'Content-Type': 'audio/mp4' } });
+        const cobaltRes = await fetch('https://api.cobalt.tools/api/json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ url, downloadMode: 'audio' })
+        }).then(r => r.json());
+        
+        if (cobaltRes.url) {
+            return Response.redirect(cobaltRes.url, 302);
+        }
     } catch (e) {
         return new Response(null, { status: 500, headers: { 'X-Error-Message': error.message } });
     }
+    
+    return new Response(null, { status: 500, headers: { 'X-Error-Message': error.message } });
   }
 }
