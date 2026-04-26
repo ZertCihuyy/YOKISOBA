@@ -27,6 +27,9 @@ export default function TikTokLivePanel() {
   const skipInitialMessagesRef = useRef(true);
   const ttsAudioRefs = useRef<HTMLAudioElement[]>([]);
   const ttsEnabledRef = useRef(ttsEnabled);
+  const readUsernameRef = useRef(readUsername);
+  const ttsPendingTextRef = useRef<string | null>(null);
+  const ttsIsPlayingRef = useRef(false);
 
   const { 
     addToQueue, removeFromQueue, addChat, setStatus, clearChat, 
@@ -39,6 +42,7 @@ export default function TikTokLivePanel() {
   } = usePlayerStore();
 
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+  useEffect(() => { readUsernameRef.current = readUsername; }, [readUsername]);
 
   const speak = useCallback(async (text: string) => {
     if (!ttsEnabledRef.current) {
@@ -51,7 +55,23 @@ export default function TikTokLivePanel() {
       return;
     }
 
+    if (ttsIsPlayingRef.current) {
+      console.log('TTS busy, queuing latest text:', trimmedText);
+      ttsPendingTextRef.current = trimmedText;
+      return;
+    }
+
+    ttsIsPlayingRef.current = true;
     console.log('TTS speaking:', trimmedText);
+
+    const finishTts = async () => {
+      ttsIsPlayingRef.current = false;
+      if (ttsPendingTextRef.current) {
+        const nextText = ttsPendingTextRef.current;
+        ttsPendingTextRef.current = null;
+        await speak(nextText);
+      }
+    };
 
     try {
       const response = await fetch(`/api/tts?text=${encodeURIComponent(trimmedText)}`);
@@ -67,16 +87,18 @@ export default function TikTokLivePanel() {
       audio.preload = 'auto';
 
       ttsAudioRefs.current.push(audio);
-      audio.onended = () => {
+      audio.onended = async () => {
         console.log('TTS audio ended');
         URL.revokeObjectURL(audioUrl);
         ttsAudioRefs.current = ttsAudioRefs.current.filter((item) => item !== audio);
+        await finishTts();
       };
 
-      audio.onerror = (e) => {
+      audio.onerror = async (e) => {
         console.error('Audio play error:', e);
         URL.revokeObjectURL(audioUrl);
         ttsAudioRefs.current = ttsAudioRefs.current.filter((item) => item !== audio);
+        await finishTts();
       };
 
       const playPromise = audio.play();
@@ -84,8 +106,9 @@ export default function TikTokLivePanel() {
       if (playPromise !== undefined) {
         playPromise.then(() => {
           console.log('TTS audio started playing');
-        }).catch((error) => {
+        }).catch(async (error) => {
           console.error('Audio play blocked:', error);
+          await finishTts();
         });
       }
     } catch (error) {
@@ -97,12 +120,21 @@ export default function TikTokLivePanel() {
           const utterance = new SpeechSynthesisUtterance(trimmedText);
           utterance.lang = 'id-ID';
           utterance.rate = 1.05;
-          utterance.onerror = (event) => console.error('SpeechSynthesis error:', event);
+          utterance.onend = async () => {
+            await finishTts();
+          };
+          utterance.onerror = async (event) => {
+            console.error('SpeechSynthesis error:', event);
+            await finishTts();
+          };
           window.speechSynthesis.cancel();
           window.speechSynthesis.speak(utterance);
         } catch (fallbackError) {
           console.error('SpeechSynthesis fallback failed:', fallbackError);
+          await finishTts();
         }
+      } else {
+        await finishTts();
       }
     }
   }, []);
@@ -200,7 +232,7 @@ export default function TikTokLivePanel() {
       }
 
       if (data.type === 'chat' && !data.isCommand && isNewMessage) {
-        const textToSpeak = readUsername ? `${data.nickname || data.user} bilang: ${data.comment}` : data.comment;
+        const textToSpeak = readUsernameRef.current ? `${data.nickname || data.user} bilang: ${data.comment}` : data.comment;
         console.log('New chat message, calling TTS:', textToSpeak);
         speak(textToSpeak);
       }
@@ -249,6 +281,8 @@ export default function TikTokLivePanel() {
       setReconnectAttempts(0);
       addChat({ user: 'System', nickname: 'System', avatar: '', comment: `Koneksi diputus manual.`, isCommand: false, type: 'chat' });
     }
+    ttsPendingTextRef.current = null;
+    ttsIsPlayingRef.current = false;
     if (window.speechSynthesis) window.speechSynthesis.cancel();
   };
 
@@ -275,6 +309,8 @@ export default function TikTokLivePanel() {
         }
       });
       ttsAudioRefs.current = [];
+      ttsPendingTextRef.current = null;
+      ttsIsPlayingRef.current = false;
     };
   }, []);
 
